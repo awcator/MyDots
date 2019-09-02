@@ -1,0 +1,6 @@
+set editing-mode nvim
+set completion-ignore-case on
+set history-size 10000
+set match-hidden-files on
+set print-completions-horizontally on
+set show-all-if-ambiguous on

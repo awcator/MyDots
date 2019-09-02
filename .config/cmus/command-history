@@ -1,0 +1,50 @@
+q
+player-pause
+Q
+vol 5
+vol 
+vol 45
+vol 100
+add ~/Music/
+3
+pl-import ~/Night
+pl-import ~/night
+pl-import night
+pl-create night
+add ~/Videos/
+clear
+pl-export Night
+pl-export night
+pl-create Rock
+player-prev 
+pl-rename Night
+pl-rename sad
+pl-rename sad Night
+pl-create sad
+f
+add ~/Music
+clear 
+refresh 
+live-filter Q]
+live-filter L
+filter 
+w
+shell ls -lar > /tmp/a.txt
+shell ls
+shell
+sh
+!
+qz
+!ls
+rand
+shuffle
+q!
+set repeat_current=false
+set repeat_current=true
+set status_display_program=
+clean
+bind -f common mouse_scroll_down win-down
+bind -f common g win-top
+help 
+add Videos/
+win-add-p
