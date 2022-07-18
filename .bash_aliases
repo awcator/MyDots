@@ -1,4 +1,7 @@
 alias la="ls -a"
+alias diff="diff --color -u"
+alias cluster_name="kubectl config view --minify -o jsonpath='{.clusters[].name}'"
+alias k="kubectl"
 alias gedit="gedit 2>/dev/null "
 alias jshell='/usr/lib/jvm/java-12-openjdk/bin/jshell'
 alias e="echo"
@@ -9,15 +12,16 @@ alias httpserver="python2 -m SimpleHTTPServer 8000"
 alias gdb="gdb -q"
 alias range="seq"
 alias time="date  +'%I:%M %p'"
-alias c="clear"
+alias c="clear && tmux clear-history"
 alias bri2="sudo nvim /sys/devices/pci0000:00/0000:00:02.0/drm/card0/card0-eDP-1/intel_backlight/brightness"
 alias lol="ls -loh"
 alias bri="sudo nvim /sys/devices/pci0000:00/0000:00:02.0/drm/card1/card1-eDP-1/intel_backlight/brightness"
 alias wifi="nmcli d wifi list"
 alias dc="steghide extract -sf"
 alias hakai="shred -n 5 -u -v -z -f "
-alias clr="clear"
-alias cler="clear"
+alias clr=" clear && tmux clear-history"
+alias cler="clear && tmux clear-history"
+alias clear="clear && tmux clear-history"
 alias xcp="xclip -selection c -o"
 alias servers="systemctl status httpd mariadb;nmap -sT localhost"
 alias s="sudo"
@@ -28,7 +32,7 @@ alias ungz="gunzip -k "
 alias unbz="bzip2 -dk "
 alias r="cd ~/.recycle"
 alias ports='netstat -tulanp'
-alias grep="grep -ia --color=auto"
+alias grep="grep -ian --color=auto"
 alias maek='make'
 alias du='du -ch'
 alias df='df -h'
@@ -56,3 +60,5 @@ alias mysql='mycli -u root -p dev'
 alias sql='mycli -u root -p dev -D rhythm' 
 alias sudo='sudo '
 alias whomai='whoami'
+#alias mybox='ssh -Y -i ~/.ssh/ams-hsop-keypair.pem ubuntu@3.68.159.129'
+alias mybox='ssh -Y -i ~/.ssh/ams-hsop-keypair.pem ubuntu@3.67.134.35'
