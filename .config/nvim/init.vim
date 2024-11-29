@@ -1,4 +1,7 @@
 set number
+set relativenumber
+set ignorecase
+set smartcase
 au VimLeave * call nvim_cursor_set_shape("vertical-bar")
 autocmd VimLeave * call system('printf "\e[5 q"')
 set nowrap
@@ -10,3 +13,11 @@ else
   let &t_EI = "\<Esc>]50;CursorShape=0\x7"
 endif
 au VimLeave * call nvim_cursor_set_shape("vertical-bar")
+set cursorline
+se mouse+=a
+color desert
+set guioptions+=a
+set clipboard+=unnamedplus
+vnoremap <C-c> "+y
+map <C-v> "+gP
+cmap w!! w !SUDO_ASKPASS=/usr/lib/ssh/x11-ssh-askpass sudo -A tee > /dev/null %

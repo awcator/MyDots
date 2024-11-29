@@ -1,3 +1,6 @@
+alias feh="feh --recursive --auto-zoom --scale-down"
+alias sandbox="firejail --noprofile --whitelist=/home/awcator/Downloads --whitelist=/home/awcator/.renpy  --whitelist=~/.config/unity3d/ --seccomp --caps.drop=all --net=none"
+alias htop="htop -s PERCENT_MEM -t"
 alias la="ls -a"
 alias diff="diff --color -u"
 alias cluster_name="kubectl config view --minify -o jsonpath='{.clusters[].name}'"
@@ -8,7 +11,7 @@ alias e="echo"
 alias refresh=" sudo sh -c 'echo 3 >/proc/sys/vm/drop_caches'"
 alias cd3="cd ../../../"
 alias hex2asci="xxd -r -p"
-alias httpserver="python2 -m SimpleHTTPServer 8000"
+alias httpserver="python -m http.server"
 alias gdb="gdb -q"
 alias range="seq"
 alias time="date  +'%I:%M %p'"
@@ -60,5 +63,8 @@ alias mysql='mycli -u root -p dev'
 alias sql='mycli -u root -p dev -D rhythm' 
 alias sudo='sudo '
 alias whomai='whoami'
-#alias mybox='ssh -Y -i ~/.ssh/ams-hsop-keypair.pem ubuntu@3.68.159.129'
-alias mybox='ssh -Y -i ~/.ssh/ams-hsop-keypair.pem ubuntu@3.67.134.35'
+#alias mybox='ssh -Y -i ~/.ssh/ams-hsop-keypair.pem -o ServerAliveInterval=60  ubuntu@3.68.159.129'
+alias mybox='ssh -Y -o ServerAliveInterval=60 -i /home/awcator/.ssh/awcator_aws.keypair.pem ubuntu@35.173.231.110'
+alias ??='gh copilot suggest'
+alias shitgitundoncommits="git reset --hard HEAD~2"
+alias shitgitsqushcommits="git reset --soft HEAD~5"

@@ -1,4 +1,4 @@
-set editing-mode nvim
+set editing-mode vim
 set completion-ignore-case on
 set history-size 10000
 set match-hidden-files on
