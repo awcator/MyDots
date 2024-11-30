@@ -1,0 +1,4 @@
+#/bin/bash
+echo called
+#echo {0..10} | xargs -d ' ' -I {} pactl set-sink-volume {} 0%
+playerctl -a pause

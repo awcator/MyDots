@@ -1,0 +1,2 @@
+#!/bin/bash
+echo "Example `oathtool -b --totp cxxxxx`" |awk '{ printf "%-20s %-40s\n", $1, $2}'
