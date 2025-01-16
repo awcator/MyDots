@@ -1,0 +1,9 @@
+# Static information about the filesystems.
+# See fstab(5) for details.
+
+# <file system> <dir> <type> <options> <dump> <pass>
+#UUID=6459e97a-fa02-49ce-bb16-f914e887188c / ext4 ro 0 1
+UUID=22b70f7a-2b36-4742-b052-745e73f42375 /home ext4 defaults 0 0
+UUID=4428-0EF7           /boot                     vfat                       rw,relatime,fmask=0022,dmask=0022,codepage=437,iocharset=iso8859-1,shortname=mixed,utf8,errors=remount-ro           0 2
+UUID=71b152d9-9486-45ec-b6ff-759c08f7528b none    swap    defaults 0 0
+/home/awcator/Documents/opt  /opt  none  bind  0  0

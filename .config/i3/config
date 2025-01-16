@@ -271,7 +271,7 @@ mode "$mode_gaps_left" {
         bindsym Return mode "$mode_gaps"
         bindsym Escape mode "default"
 }
-exec_always compton -f
+#exec_always compton -f
 gaps outer 15
 gaps inner 15
 
@@ -284,7 +284,7 @@ assign [class="TelegramDesktop"] $ws5
 assign [class="Firefox"] $ws6
 assign [class="discord"] $ws3
 assign [class="vlc"] $ws7	
-for_window [class="Microsoft Teams - Preview"] move to workspace $ws4
+for_window [class="teams-for-linux"] move to workspace $ws4
 for_window [class="jetbrains-idea"] move to workspace $ws3
 
 workspace $ws2 gaps outer 0
@@ -297,14 +297,17 @@ smart_gaps on
 
 bindsym $mod+p exec /bin/poweroff
 #exec --no-startup-id steam
+exec --no-startup-id bitwarden-desktop
 exec --no-startup-id brave
-exec --no-startup-id echo {0..10} | xargs -d ' ' -I {} pactl set-source-mute {} 1 # start system with mic off 
+exec --no-startup-id kwalletd6
+exec --no-startup-id sleep 30 && echo {0..10} | xargs -d ' ' -I {} sh -c "sleep 5; pactl set-source-mute {} 0; pactl set-source-mute {} 1;"
 exec --no-startup-id parcellite
 # exec --no-startup-id i3-battery-popup  -n -I 2% -L 20% -s ~/audio/i3-battery-popup.wav -v 30
 exec --no-startup-id i3-battery-popup  -n -I 2% -L 20% -v 30
 exec --no-startup-id dunst
 #exec_always --no-startup-id picom --backend xrender
 exec --no-startup-id /home/awcator/bin/bluetooth_autostopper.sh
+exec --no-startup-id ~/bin/micnotify.sh
 exec --no-startup-id blueman-applet
 # Start spotify and whatsapp on workspace 2
 
@@ -336,11 +339,11 @@ bindsym XF86MonBrightnessDown exec  --no-startup-id brightnessctl set 10%-
 
 #exec synclient TapButton1=1
 #
-exec --no-startup-id ./i3status.sh 
+#exec --no-startup-id ./i3status.sh 
 #exec --no-startup-id  xwinwrap -ov -fs -- mplayer -wid WID -quiet -loop 0 ~/space.mp4
 
 # Multi-screen screenshots with scrot
-bindsym --release Print exec scrot -s 'screenshot_%Y%m%d_%H%M%S.png' -e 'mkdir -p ~/Pictures/screenshots && mv $f ~/Pictures/screenshots && xclip -selection clipboard -t image/png -i ~/Pictures/screenshots/`ls -1 -t ~/Pictures/screenshots | head -1`' # All screens
+bindsym --release Print exec scrot -q 100 -s 'screenshot_%Y%m%d_%H%M%S.png' -e 'mkdir -p ~/Pictures/screenshots && mv $f ~/Pictures/screenshots && xclip -selection clipboard -t image/png -i ~/Pictures/screenshots/`ls -1 -t ~/Pictures/screenshots | head -1`' # All screens
 #bindsym $mod+n exec i3-input -F 'rename workspace to "'`i3-msg -t get_workspaces | jq '.[] | select(.visible == true)' | jq .num`': %s"' -P "new name? "
 #exec_always --no-startup-id numlockx on
 #exec_always --no-startup-id compton

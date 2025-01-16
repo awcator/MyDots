@@ -1,0 +1,30 @@
+#!/bin/bash
+systemctl list-unit-files --state=enabled
+journalctl -p err
+echo "Checking open network ports:"
+sudo netstat -tulpan 
+echo "Checking for failed services:"
+systemctl --failed
+echo "Recent user logins:"
+last -n 10
+echo "Checking cron jobs:"
+for user in $(cut -f1 -d: /etc/passwd); do crontab -l -u $user 2>/dev/null | sed "s/^/$user: /"; done
+echo "Checking user-level autostart applications:"
+ls ~/.config/autostart/ || echo "No user-level autostart applications found."
+
+echo "Checking system-wide autostart applications:"
+ls /etc/xdg/autostart/ || echo "No system-wide autostart applications found."
+
+echo "Parsing startup entries:"
+grep -E 'Exec|Name' ~/.config/autostart/*.desktop /etc/xdg/autostart/*.desktop 2>/dev/null || echo "No startup entries found."
+
+echo "Checking shell startup files for custom commands:"
+grep -i "startup" ~/.bashrc ~/.bash_profile ~/.zshrc ~/.profile || echo "No custom startup commands found."
+
+echo "Checking cron jobs for startup tasks:"
+crontab -l || echo "No user-level cron jobs found."
+cat /etc/crontab || echo "No system-wide cron jobs found."
+
+#Inodes usedUp by prcoess
+sudo lsof +L1
+

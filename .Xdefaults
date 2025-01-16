@@ -102,8 +102,8 @@ URxvt.matcher.button: 1
 URxvt.keysym.M-e: matcher:last
 !URxvt.matcher.pattern.1: (?i)\\berror\\b
 !# make it red color of matched
-URxvt.matcher.pattern.1: (?i)(tear|remove|downloss|unable|miss|unable|not|end|quit|exit|negative|duplicate|delete|error|exception|warning|destroy|fatal|critical|failure|not\s+found|invalid|timeout|timedout|denied|out\s+of\s+memory|caught|exception|failed|refused|unavailable|unsuccessful|unresolved|unhealthy|unstable|broken|wrong|incorrect|bad|failed|not\s+ok|not\s+okay|unsuccessful|404|403|500|502|503|504|400|401)
-URxvt.matcher.pattern.3: (?i)(update|middle|draw|ignore|deprecate|waiting|loading|pending|processing|running|busy|working|progress|process|queued|started|initiated|queue|line|processing|executing|mandatory|required|needed|essential|compulsory|indispensable|imperative|vital|necessity|must|should|need|have\s+to|got\s+to|ought\s+to|supposed|be\s+to|be\s+supposed\s+to)
+URxvt.matcher.pattern.1: (?i)(loss|down|crash|tear|remove|unable|miss|unable|not|end|quit|exit|negative|duplicate|delete|error|exception|warning|destroy|fatal|critical|failure|not\s+found|invalid|timeout|timedout|denied|out\s+of\s+memory|caught|exception|failed|refused|unavailable|unsuccessful|unresolved|unhealthy|unstable|broken|wrong|incorrect|bad|failed|not\s+ok|not\s+okay|unsuccessful|404|403|500|502|503|504|400|401)
+URxvt.matcher.pattern.3: (?i)(status|work|update|middle|draw|ignore|deprecate|waiting|loading|pending|processing|running|busy|working|progress|process|queued|started|initiated|queue|line|processing|executing|mandatory|required|needed|essential|compulsory|indispensable|imperative|vital|necessity|must|should|need|have\s+to|got\s+to|ought\s+to|supposed|be\s+to|be\s+supposed\s+to)
 URxvt.matcher.pattern.2: (?i)(install|deploy|win|up|able|start|success|passed|postive|complete|create|available|ready|connected|running|valid|approved|enabled|authorized|granted|active|resolved|healthy|stable|worked|succeeded|accepted|correct|good|fine|ok|okay|successful|200|201|204|202|203)
 URxvt.matcher.rend.1: Bold fg3
 URxvt.matcher.rend.3: Bold fg5

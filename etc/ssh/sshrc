@@ -1,0 +1,4 @@
+#!/bin/bash
+ip=`echo $SSH_CONNECTION | cut -d " " -f 1`
+echo "User $USER just logged in from $ip" > /tmp/sshlog
+notify-send -i /usr/share/icons/breeze-dark/apps/64/hotspot.svg -u critical -t 30000 "SSH loggin detected: User $USER just logged in from $ip"
