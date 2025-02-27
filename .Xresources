@@ -56,7 +56,7 @@ URxvt.keysym.Shift-Control-V: eval:paste_clipboard
 URxvt.keysym.Shift-Control-C: eval:selection_to_clipboard
 
 URxvt.transparent:   true
-urxvt*shading: 30
+urxvt*shading: 10
 
 
 ! special

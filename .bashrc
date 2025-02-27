@@ -6,7 +6,7 @@ white="$(tput bold;tput setaf 0)"
 red="$(tput bold; tput setaf 1)"
 nc="$(tput sgr0)"
 # exports
-export PATH="${HOME}/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin:/home/xicor/Android/Sdk/platform-tools/:"
+export PATH="${HOME}/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin:~/Android/Sdk/platform-tools/:/usr/lib/jvm/default/bin/:/var/lib/snapd/snap/bin/:/opt/cuda/bin/"
 export PATH="${PATH}/usr/local/sbin:/opt/bin:/usr/bin/core_perl:/usr/games/bin:${HOME}/.local/bin/"
 #export PS1="\[$red\][ \[$darkgrey\]\H \[$white\]\W\[$darkgrey\] \[$red\]]\\[$darkgrey\] $ \[$nc\]"
 PS1="\[\033[0;31m\]\342\224\214\342\224\200\$([[ \$? != 0 ]] && echo \"[\[\033[0;31m\]\342\234\227\[\033[0;37m\]]\342\224\200\")[$(if [[ ${EUID} == 0 ]]; then echo '\[\033[01;31m\]root\[\033[01;33m\]@\[\033[01;96m\]\h'; else echo '\[\033[0;39m\]\u\[\033[01;33m\]@\[\033[01;96m\]\h'; fi)\[\033[0;31m\]]\342\224\200[\[\033[0;32m\]\w\[\033[0;31m\]]\n\[\033[0;31m\]\342\224\224\342\224\200\342\224\200\342\225\274 \[\033[0m\]\[\e[01;33m\]\\$\[\e[0m\]"
@@ -44,3 +44,4 @@ reset-cursor() {
 export PS1="$(reset-cursor)$PS1"
 export DRI_PRIME=1 # load up nvidia driver
 export __NV_PRIME_RENDER_OFFLOAD=1 __GLX_VENDOR_LIBRARY_NAME=nvidia __VK_LAYER_NV_optimus=NVIDIA_only
+export OLLAMA_NOPRUNE=true

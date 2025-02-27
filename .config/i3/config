@@ -297,9 +297,9 @@ smart_gaps on
 
 bindsym $mod+p exec /bin/poweroff
 #exec --no-startup-id steam
-exec --no-startup-id bitwarden-desktop
+#exec --no-startup-id bitwarden-desktop
 exec --no-startup-id brave
-exec --no-startup-id kwalletd6
+#exec --no-startup-id kwalletd6
 exec --no-startup-id sleep 30 && echo {0..10} | xargs -d ' ' -I {} sh -c "sleep 5; pactl set-source-mute {} 0; pactl set-source-mute {} 1;"
 exec --no-startup-id parcellite
 # exec --no-startup-id i3-battery-popup  -n -I 2% -L 20% -s ~/audio/i3-battery-popup.wav -v 30

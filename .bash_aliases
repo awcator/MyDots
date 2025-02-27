@@ -1,12 +1,12 @@
+alias less="less -R"
 alias feh="feh --recursive --auto-zoom --scale-down"
 alias sandbox="firejail --noprofile --whitelist=/home/awcator/Downloads --whitelist=/home/awcator/.renpy  --whitelist=~/.config/unity3d/ --seccomp --caps.drop=all --net=none"
 alias htop="htop -s PERCENT_CPU -t"
 alias la="ls -a"
-alias diff="diff --color -u"
+alias diff="diff --color=always -u"
 alias cluster_name="kubectl config view --minify -o jsonpath='{.clusters[].name}'"
 alias k="kubectl"
 alias gedit="gedit 2>/dev/null "
-alias jshell='/usr/lib/jvm/java-12-openjdk/bin/jshell'
 alias e="echo"
 alias refresh=" sudo sh -c 'echo 3 >/proc/sys/vm/drop_caches'"
 alias cd3="cd ../../../"
@@ -73,3 +73,4 @@ alias shitgiterasefilehistory="git filter-branch --force --index-filter 'git rm 
 alias clamdscan="clamdscan -m -i --move=/home/awcator/Documents/infected "
 alias quickreboot="sudo kexec -l /boot/vmlinuz-linux --initrd=/boot/initramfs-linux.img --reuse-cmdline && sudo kexec -e"
 alias wtf='sudo !!'
+alias catall="tail -n +1"
