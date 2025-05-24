@@ -66,7 +66,7 @@ alias whomai='whoami'
 #alias mybox='ssh -Y -i ~/.ssh/ams-hsop-keypair.pem -o ServerAliveInterval=60  ubuntu@3.68.159.129'
 alias mybox='ssh -Y -o ServerAliveInterval=60 -i /home/awcator/.ssh/awcator_aws.keypair.pem ubuntu@35.173.231.110'
 alias ???='gh copilot suggest'
-alias ??='function _aianswer(){ echo -e "\e[31mduckduckgo: \e[0m"; tgpt --provider duckduckgo "$1"; echo -e "\e[31mphind: \e[0m"; tgpt --provider phind "$1"; }; _aianswer'
+alias ??='function _aianswer(){ echo -e "\e[31mpollinations: \e[0m"; tgpt --provider pollinations "$1"; echo -e "\e[31mphind: \e[0m"; tgpt --provider phind "$1"; }; _aianswer'
 alias shitgitundoncommits="git reset --hard HEAD~2"
 alias shitgitsqushcommits="git reset --soft HEAD~5"
 alias shitgiterasefilehistory="git filter-branch --force --index-filter 'git rm --cached --ignore-unmatch my_sensitiveFile' --prune-empty --tag-name-filter cat 01c859dd7d34017efe4a722734b2eee80ed10c64..HEAD"
@@ -74,3 +74,4 @@ alias clamdscan="clamdscan -m -i --move=/home/awcator/Documents/infected "
 alias quickreboot="sudo kexec -l /boot/vmlinuz-linux --initrd=/boot/initramfs-linux.img --reuse-cmdline && sudo kexec -e"
 alias wtf='sudo !!'
 alias catall="tail -n +1"
+alias tree="tree -C -h --dirsfirst -F"

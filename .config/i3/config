@@ -1,7 +1,9 @@
 set $mod Mod4
+for_window [instance=windsurf] sticky enable
 font pango:Source Code Pro 13
 floating_modifier $mod
 bindsym $mod+Return exec urxvt
+bindsym $mod+T exec ~/bin/clipOCRclip
 bindsym $mod+g exec brave
 bindsym $mod+n exec thunar
 bindsym mod1+d exec /home/Awcator/.config/i3/tooglePolybar
@@ -12,10 +14,10 @@ bindsym $mod+d exec "rofi  -modi combi -combi-modi window -show drun  -theme sty
 bindsym Mod1+Tab exec --no-startup-id rofi  -modi combi -combi-modi window -show combi  -theme ~/.config/rofi/style-6.rasi
 #bindsym $mod+d exec dmenu_run
 # change focus
-bindsym $mod+j focus left
-bindsym $mod+k focus down
-#bindsym $mod+l focus up
-bindsym $mod+semicolon focus right
+#bindsym $mod+j focus left
+#bindsym $mod+k focus down
+##bindsym $mod+l focus up
+#bindsym $mod+semicolon focus right
 
 # alternatively, you can use the cursor keys:
 bindsym $mod+Left focus left
@@ -285,6 +287,7 @@ assign [class="Firefox"] $ws6
 assign [class="discord"] $ws3
 assign [class="vlc"] $ws7	
 for_window [class="teams-for-linux"] move to workspace $ws4
+for_window [class="teams-for-linux"] urgency_hint off
 for_window [class="jetbrains-idea"] move to workspace $ws3
 
 workspace $ws2 gaps outer 0
@@ -299,6 +302,8 @@ bindsym $mod+p exec /bin/poweroff
 #exec --no-startup-id steam
 #exec --no-startup-id bitwarden-desktop
 exec --no-startup-id brave
+exec --no-startup-id nm-applet
+exec --no-startup-id volumeicon
 #exec --no-startup-id kwalletd6
 exec --no-startup-id sleep 30 && echo {0..10} | xargs -d ' ' -I {} sh -c "sleep 5; pactl set-source-mute {} 0; pactl set-source-mute {} 1;"
 exec --no-startup-id parcellite
@@ -343,6 +348,7 @@ bindsym XF86MonBrightnessDown exec  --no-startup-id brightnessctl set 10%-
 #exec --no-startup-id  xwinwrap -ov -fs -- mplayer -wid WID -quiet -loop 0 ~/space.mp4
 
 # Multi-screen screenshots with scrot
+bindsym --release Shift+Print exec bash -c 'scrot -q 100 -s /tmp/scrot_clip.png && xclip -selection clipboard -t image/png -i /tmp/scrot_clip.png && rm /tmp/scrot_clip.png'
 bindsym --release Print exec scrot -q 100 -s 'screenshot_%Y%m%d_%H%M%S.png' -e 'mkdir -p ~/Pictures/screenshots && mv $f ~/Pictures/screenshots && xclip -selection clipboard -t image/png -i ~/Pictures/screenshots/`ls -1 -t ~/Pictures/screenshots | head -1`' # All screens
 #bindsym $mod+n exec i3-input -F 'rename workspace to "'`i3-msg -t get_workspaces | jq '.[] | select(.visible == true)' | jq .num`': %s"' -P "new name? "
 #exec_always --no-startup-id numlockx on
@@ -353,6 +359,11 @@ bindsym XF86AudioRaiseVolume exec --no-startup-id echo {0..10} | xargs -d ' ' -I
 bindsym XF86AudioLowerVolume exec --no-startup-id echo {0..10} | xargs -d ' ' -I {} pactl set-sink-volume {} -5%
 bindsym XF86AudioMute exec --no-startup-id echo {0..10} | xargs -d ' ' -I {} pactl set-sink-mute {} toggle # mute sound
 bindsym XF86AudioMicMute exec --no-startup-id echo {0..10} | xargs -d ' ' -I {} pactl set-source-mute {} toggle # mute sound
+
+#bindsym XF86AudioRaiseVolume exec pactl set-sink-volume @DEFAULT_SINK@ +5%; exec pactl set-sink-mute @DEFAULT_SINK@ 0
+#bindsym XF86AudioLowerVolume exec pactl set-sink-volume @DEFAULT_SINK@ -5%; exec pactl set-sink-mute @DEFAULT_SINK@ 0
+#bindsym XF86AudioMute exec pactl set-sink-mute @DEFAULT_SINK@ toggle
+#bindsym XF86AudioMicMute exec pactl set-source-mute @DEFAULT_SINK@ toggle
 # Sreen brightness controls
 #bindsym XF86MonBrightnessUp exec xbacklight -inc 20 # increase screen brightness
 #bindsym XF86MonBrightnessDown exec xbacklight -dec 20 # decrease screen brightness
@@ -361,6 +372,7 @@ bindsym XF86AudioMicMute exec --no-startup-id echo {0..10} | xargs -d ' ' -I {} 
 #bindsym XF86TouchpadToggle exec /some/path/toggletouchpad.sh # toggle touchpad
 
 # Media player controls
+bindsym F12 exec playerctl play-pause
 bindsym XF86AudioPlay exec playerctl play-pause
 bindsym XF86AudioNext exec playerctl next
 bindsym XF86AudioPrev exec playerctl previous
@@ -387,3 +399,4 @@ workspace $ws5 gaps outer 30
 
 smart_gaps on
 for_window [class="Zenity"] floating enable
+bindsym $mod+k exec xkill

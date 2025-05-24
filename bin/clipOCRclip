@@ -1,0 +1,26 @@
+#!/bin/bash
+
+set -e
+TMP_DIR=$(mktemp -d)
+IMAGE="$TMP_DIR/input.png"
+BORDERED="$TMP_DIR/bordered.png"
+
+# Check if clipboard has an image
+if xclip -selection clipboard -t image/png -o > "$IMAGE" 2>/dev/null; then
+    convert "$IMAGE" -bordercolor White -border 10x10 "$BORDERED"
+    
+    OCR_TEXT=$(tesseract "$BORDERED" stdout 2>/dev/null)
+    
+    if [[ -n "$OCR_TEXT" ]]; then
+        echo "$OCR_TEXT" | xclip -selection clipboard -i
+        notify-send "clipOCRclip" "\"$OCR_TEXT\"  copied to the clipboard"
+    else
+        notify-send "Tesseract OCR Failed" "No text could be extracted from image."
+        exit 1
+    fi
+else
+    notify-send "No Image in Clipboard" "Clipboard does not contain an image."
+    exit 1
+fi
+
+rm -rf "$TMP_DIR"

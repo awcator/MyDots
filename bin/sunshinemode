@@ -1,0 +1,8 @@
+#!/bin/bash
+xrandr --output eDP-1 --auto
+cvt 2241 1080
+xrandr --newmode   "2248x1080_60.00"  202.50  2248 2392 2632 3016  1080 1083 1093 1120 -hsync +vsync
+xrandr --addmode eDP-1 "2240x1080_60.00"
+xrandr --addmode eDP-1 "2248x1080_60.00" 
+xrandr --output eDP-1 --mode "2248x1080_60.00" 
+sunshine
