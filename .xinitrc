@@ -8,4 +8,6 @@ export GSK_RENDERER=cairo
 
 systemctl --user import-environment DISPLAY XAUTHORITY
 dbus-update-activation-environment --systemd DISPLAY XAUTHORITY XDG_CURRENT_DESKTOP
+xrandr --setprovideroutputsource NVIDIA-G0 modesetting
+xrandr --auto
 exec i3

@@ -5,8 +5,8 @@ white="$(tput bold ; tput setaf 3)"
 red="$(tput bold; tput setaf 1)"
 nc="$(tput sgr0)"
 # exports
-export PATH="${HOME}/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin:${HOME}/Android/Sdk/platform-tools/:/usr/lib/jvm/default/bin/:/var/lib/snapd/snap/bin/"
-export PATH="${PATH}:/usr/local/sbin:/opt/bin:/usr/bin/core_perl:/usr/games/bin:${HOME}/.gem/ruby/2.6.0/bin/:${HOME}/.local/bin/:/opt/cuda/bin/"
+export PATH="${HOME}/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin:${HOME}/Android/Sdk/platform-tools/:/usr/lib/jvm/default/bin/:/var/lib/snapd/snap/bin/:~/.pyenv/versions/2.7.18/bin/"
+export PATH="${PATH}:/usr/local/sbin:/opt/bin:/usr/bin/core_perl:/usr/games/bin:${HOME}/.gem/ruby/2.6.0/bin/:${HOME}/.local/bin/:/opt/cuda/bin/:$HOME/go/bin/"
 #export PS1="\[$red\][ \[$darkgrey\]\H \[$white\]\W\[$darkgrey\] \[$red\]]\\[$darkgrey\] $ \[$nc\]"
 function nonzero_return() {
 	RETVAL=$?
@@ -97,11 +97,6 @@ fi
   . /usr/share/bash-completion/completions/*
 # Avoid duplicates
 export HISTCONTROL=ignoredups:erasedups  
-# When the shell exits, append to the history file instead of overwriting it
-shopt -s histappend
-
-# After each command, append to the history file and reread it
-export PROMPT_COMMAND="${PROMPT_COMMAND:+$PROMPT_COMMAND$'\n'}history -a; history -c; history -r"
 
 MY_BASH_BLUE="\033[0;34m" #Blue
 MY_BASH_NOCOLOR="\033[0m"
@@ -109,12 +104,25 @@ HISTTIMEFORMAT=`echo -e ${MY_BASH_BLUE}[%F %T] $MY_BASH_NOCOLOR `
 
 export DRI_PRIME=1
 export __NV_PRIME_RENDER_OFFLOAD=1 __GLX_VENDOR_LIBRARY_NAME=nvidia __VK_LAYER_NV_optimus=NVIDIA_only
-shopt -s histappend    
 # Save multi-line commands as one command
 shopt -s cmdhist
-export PROMPT_COMMAND='history -a'    
 export HISTCONTROL=ignoredups    
-export HISTSIZE=9999
-export HISTFILESIZE=999999
+export HISTSIZE=-1
+export HISTFILESIZE=-1
 export HISTFILE="$HOME/.bash_history"    
 export OLLAMA_NOPRUNE=true
+export GSK_RENDERER=cairo
+source /usr/share/nvm/init-nvm.sh
+shopt -s histappend
+PROMPT_COMMAND="history -a;$PROMPT_COMMAND"
+eval "$(zoxide init bash --cmd cd)"
+
+export PYENV_ROOT="$HOME/.pyenv"
+[[ -d $PYENV_ROOT/bin ]] && export PATH="$PYENV_ROOT/bin:$PATH"
+eval "$(pyenv init - bash)"
+
+
+
+# Added by Toolbox App
+export PATH="$PATH:/home/awcator/.local/share/JetBrains/Toolbox/scripts"
+
