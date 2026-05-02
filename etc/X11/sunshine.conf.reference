@@ -4,3 +4,4 @@ min_log_level = 2
 ping_timeout = 20000
 wan_encryption_mode = 0
 7
+output_name = 7

@@ -1,10 +1,46 @@
+#hide borders
+#default_border none
+#default_floating_border pixel 0
+#font pango:Ubuntu Bold 0
+#for_window [class=".*"] title_format ""
+
 set $mod Mod4
+
+# Catppuccin Mocha Color Palette (used by i3bar, etc.)
+set $rosewater #f5e0dc
+set $flamingo  #f2cdcd
+set $pink      #f5c2e7
+set $mauve     #cba6f7
+set $red       #f38ba8
+set $maroon    #eba0ac
+set $peach     #fab387
+set $green     #a6e3a1
+set $teal      #94e2d5
+set $sky       #89dceb
+set $sapphire  #74c7ec
+set $blue      #89b4fa
+set $lavender  #b4befe
+set $text      #cdd6f4
+set $subtext1  #bac2de
+set $subtext0  #a6adc8
+set $overlay2  #9399b2
+set $overlay1  #7f849c
+set $overlay0  #6c7086
+set $surface2  #585b70
+set $surface1  #45475a
+set $surface0  #313244
+set $base      #1e1e2e
+set $mantle    #181825
+set $crust     #11111b
+
+no_focus [class="teams-for-linux"]
+for_window [class="teams-for-linux" urgent="latest"] focus
 for_window [instance=windsurf] sticky enable
 font pango:Source Code Pro 13
 floating_modifier $mod
-bindsym $mod+Return exec urxvt
+bindsym $mod+Return exec __NV_PRIME_RENDER_OFFLOAD=1 __GLX_VENDOR_LIBRARY_NAME=nvidia kitty
 bindsym $mod+T exec ~/bin/clipOCRclip
-bindsym $mod+g exec brave
+bindsym $mod+g exec brave #--use-gl=desktop
 bindsym $mod+n exec thunar
 bindsym mod1+d exec /home/Awcator/.config/i3/tooglePolybar
 bindsym mod1+F4 kill
@@ -53,6 +89,7 @@ bindsym $mod+e layout toggle split
 
 # toggle tiling / floating
 bindsym $mod+Shift+space floating toggle
+bindsym $mod+Shift+s sticky toggle
 
 # change focus between tiling / floating windows
 bindsym $mod+space focus mode_toggle
@@ -101,8 +138,14 @@ bindsym $mod+Shift+8 move container to workspace $ws8
 bindsym $mod+Shift+9 move container to workspace $ws9
 bindsym $mod+Shift+0 move container to workspace $ws10
 
-# add screen lock
-bindsym $mod+l exec "i3lock"
+
+# NOTE: NVIDIA PRIME offload for picom does NOT work — causes black screen
+# (BadDrawable X errors: compositor can't draw to cross-GPU pixmaps)
+#exec_always --no-startup-id killall picom; sleep 0.2; env __NV_PRIME_RENDER_OFFLOAD=1 __GLX_VENDOR_LIBRARY_NAME=nvidia picom --config ~/.config/picom/picom.conf -b
+exec_always --no-startup-id pkill -xf "picom.*$DISPLAY" || true; sleep 0.2; picom --config ~/.config/picom/picom.conf -b
+
+# add screen lock (betterlockscreen with blur)
+bindsym $mod+l exec --no-startup-id betterlockscreen -l dimblur --off 10
 # reload the configuration file
 bindsym $mod+Shift+c reload
 # restart i3 inplace (preserves your layout/session, can be used to upgrade i3)
@@ -143,6 +186,20 @@ bar {
 	mode hide
 	hidden_state hide
     modifier Mod1
+	#output eDP-1
+	#tray_output eDP-1
+
+    colors {
+        background         $base
+        statusline         $text
+        separator          $surface1
+        # class            border     backgr.    text
+        focused_workspace  $lavender  $lavender  $crust
+        active_workspace   $overlay0  $surface0  $text
+        inactive_workspace $base      $base      $overlay1
+        urgent_workspace   $peach     $peach     $crust
+        binding_mode       $mauve     $mauve     $crust
+    }
 }
 #exec_always --no-startup-id ~/.config/polybar/launch.sh
 
@@ -277,7 +334,7 @@ mode "$mode_gaps_left" {
 gaps outer 15
 gaps inner 15
 
-bindsym $mod+Tab workspace back_and_forth	
+bindsym $mod+Tab workspace back_and_forth
 
 for_window [class="Spotify"] move to workspace $ws9
 assign [class="Chromium"] $ws2
@@ -285,10 +342,11 @@ assign [class="dde-file-manager"] $ws4
 assign [class="TelegramDesktop"] $ws5
 assign [class="Firefox"] $ws6
 assign [class="discord"] $ws3
-assign [class="vlc"] $ws7	
+assign [class="vlc"] $ws7
 for_window [class="teams-for-linux"] move to workspace $ws4
 for_window [class="teams-for-linux"] urgency_hint off
 for_window [class="jetbrains-idea"] move to workspace $ws3
+for_window [class="jetbrains-rider"] move to workspace $ws3
 
 workspace $ws2 gaps outer 0
 workspace $ws2 gaps inner 10
@@ -298,26 +356,27 @@ workspace $ws5 gaps outer 30
 
 smart_gaps on
 
-bindsym $mod+p exec /bin/poweroff
+# Safe power menu (lock/logout/suspend/reboot/shutdown)
+bindsym $mod+p exec --no-startup-id ~/.config/i3/powermenu.sh
 #exec --no-startup-id steam
 #exec --no-startup-id bitwarden-desktop
 exec --no-startup-id brave
-exec --no-startup-id nm-applet
-exec --no-startup-id volumeicon
+exec --no-startup-id pgrep -x nm-applet || nm-applet
+exec --no-startup-id pgrep -x volumeicon || volumeicon
 #exec --no-startup-id kwalletd6
 exec --no-startup-id sleep 30 && echo {0..10} | xargs -d ' ' -I {} sh -c "sleep 5; pactl set-source-mute {} 0; pactl set-source-mute {} 1;"
-exec --no-startup-id parcellite
+exec --no-startup-id pgrep -x parcellite || parcellite
 # exec --no-startup-id i3-battery-popup  -n -I 2% -L 20% -s ~/audio/i3-battery-popup.wav -v 30
 exec --no-startup-id i3-battery-popup  -n -I 2% -L 20% -v 30
-exec --no-startup-id dunst
+exec --no-startup-id pgrep -x dunst || dunst
 #exec_always --no-startup-id picom --backend xrender
 exec --no-startup-id /home/awcator/bin/bluetooth_autostopper.sh
 exec --no-startup-id ~/bin/micnotify.sh
-exec --no-startup-id blueman-applet
+exec --no-startup-id pgrep -x blueman-applet || blueman-applet
 # Start spotify and whatsapp on workspace 2
 
 # Open Atom on workspace 3
-for_window [instance="urxvt"] move to workspace $ws2
+for_window [instance="kitty"] move to workspace $ws2
 for_window [instance="nautilus"] move to workspace $ws3
 for_window [instance="google-chrome-stable"] move to workspace $ws1
 
@@ -330,8 +389,8 @@ for_window [instance="google-chrome-stable"] move to workspace $ws1
 #bindsym XF86AudioMute exec --no-startup-id pactl set-sink-mute 0 toggle # mute sound
 
 # Sreen brightness controls
-bindsym XF86MonBrightnessUp exec --no-startup-id brightnessctl set +10%
-bindsym XF86MonBrightnessDown exec  --no-startup-id brightnessctl set 10%-
+bindsym XF86MonBrightnessUp exec --no-startup-id ~/.config/i3/osd.sh bright-up
+bindsym XF86MonBrightnessDown exec --no-startup-id ~/.config/i3/osd.sh bright-down
 
 # Touchpad controls
 #exec_always --no-startup-id /home/Awcator/.config/i3/toggletouchpad.sh # toggle touchpad
@@ -344,24 +403,30 @@ bindsym XF86MonBrightnessDown exec  --no-startup-id brightnessctl set 10%-
 
 #exec synclient TapButton1=1
 #
-#exec --no-startup-id ./i3status.sh 
-#exec --no-startup-id  xwinwrap -ov -fs -- mplayer -wid WID -quiet -loop 0 ~/space.mp4
+#exec --no-startup-id ./i3status.sh
+#exec --no-startup-id  xwinwrap -ov -fs -- mplayer -wid WID -quiet -loop 0 ~/car.mp4
 
-# Multi-screen screenshots with scrot
-bindsym --release Shift+Print exec bash -c 'scrot -q 100 -s /tmp/scrot_clip.png && xclip -selection clipboard -t image/png -i /tmp/scrot_clip.png && rm /tmp/scrot_clip.png'
-bindsym --release Print exec scrot -q 100 -s 'screenshot_%Y%m%d_%H%M%S.png' -e 'mkdir -p ~/Pictures/screenshots && mv $f ~/Pictures/screenshots && xclip -selection clipboard -t image/png -i ~/Pictures/screenshots/`ls -1 -t ~/Pictures/screenshots | head -1`' # All screens
+# Screenshots with scrot
+bindsym --release Shift+Print exec bash -c 'scrot --select --line mode=edge -q 100 -s /tmp/scrot_clip.png && xclip -selection clipboard -t image/png -i /tmp/scrot_clip.png && rm /tmp/scrot_clip.png'
+bindsym --release Print exec scrot --select --line mode=edge -q 100 -s 'screenshot_%Y%m%d_%H%M%S.png' -e 'mkdir -p ~/Pictures/screenshots && mv $f ~/Pictures/screenshots && xclip -selection clipboard -t image/png -i ~/Pictures/screenshots/`ls -1 -t ~/Pictures/screenshots | head -1` && notify-send "Screenshot saved"' # All screens
+
+#bindsym --release Print exec --no-startup-id bash -c 'maim ~/Pictures/screenshots/screenshot_$(date +%Y%m%d_%H%M%S).png && notify-send "Screenshot saved"'
+#bindsym --release Shift+Print exec --no-startup-id bash -c 'maim -s | xclip -selection clipboard -t image/png && notify-send "Selection copied to clipboard"'
+#bindsym --release $mod+Print exec --no-startup-id bash -c 'maim -s ~/Pictures/screenshots/screenshot_$(date +%Y%m%d_%H%M%S).png && notify-send "Selection saved"'
 #bindsym $mod+n exec i3-input -F 'rename workspace to "'`i3-msg -t get_workspaces | jq '.[] | select(.visible == true)' | jq .num`': %s"' -P "new name? "
 #exec_always --no-startup-id numlockx on
 #exec_always --no-startup-id compton
 
 # Pulse Audio controls
-bindsym XF86AudioRaiseVolume exec --no-startup-id echo {0..10} | xargs -d ' ' -I {} pactl set-sink-volume {} +5% 
-bindsym XF86AudioLowerVolume exec --no-startup-id echo {0..10} | xargs -d ' ' -I {} pactl set-sink-volume {} -5%
-bindsym XF86AudioMute exec --no-startup-id echo {0..10} | xargs -d ' ' -I {} pactl set-sink-mute {} toggle # mute sound
-bindsym XF86AudioMicMute exec --no-startup-id echo {0..10} | xargs -d ' ' -I {} pactl set-source-mute {} toggle # mute sound
+bindsym XF86AudioRaiseVolume exec --no-startup-id ~/.config/i3/osd.sh vol-up
+bindsym XF86AudioLowerVolume exec --no-startup-id ~/.config/i3/osd.sh vol-down
+bindsym XF86AudioMute exec --no-startup-id ~/.config/i3/osd.sh vol-mute
+bindsym XF86AudioMicMute exec --no-startup-id ~/.config/i3/osd.sh mic-mute
 
-#bindsym XF86AudioRaiseVolume exec pactl set-sink-volume @DEFAULT_SINK@ +5%; exec pactl set-sink-mute @DEFAULT_SINK@ 0
-#bindsym XF86AudioLowerVolume exec pactl set-sink-volume @DEFAULT_SINK@ -5%; exec pactl set-sink-mute @DEFAULT_SINK@ 0
+#bindsym XF86AudioRaiseVolume exec pactl set-sink-volume @DEFAULT_SINK@ +5%;
+#exec pactl set-sink-mute @DEFAULT_SINK@ 0
+#bindsym XF86AudioLowerVolume exec pactl set-sink-volume @DEFAULT_SINK@ -5%;
+#exec pactl set-sink-mute @DEFAULT_SINK@ 0
 #bindsym XF86AudioMute exec pactl set-sink-mute @DEFAULT_SINK@ toggle
 #bindsym XF86AudioMicMute exec pactl set-source-mute @DEFAULT_SINK@ toggle
 # Sreen brightness controls
@@ -376,6 +441,8 @@ bindsym F12 exec playerctl play-pause
 bindsym XF86AudioPlay exec playerctl play-pause
 bindsym XF86AudioNext exec playerctl next
 bindsym XF86AudioPrev exec playerctl previous
+bindsym $mod+Shift+N  exec playerctl next
+bindsym $mod+Shift+B  exec playerctl previous
 
 exec_always --no-startup-id feh --bg-scale ~/Pictures/nice.jpg
 gaps outer 15
@@ -388,7 +455,7 @@ assign [class="dde-file-manager"] $ws4
 assign [class="TelegramDesktop"] $ws5
 assign [class="Firefox"] $ws6
 assign [class="discord"] $ws3
-assign [class="vlc"] $ws7	
+assign [class="vlc"] $ws7
 
 
 workspace $ws2 gaps outer 0
@@ -400,3 +467,34 @@ workspace $ws5 gaps outer 30
 smart_gaps on
 for_window [class="Zenity"] floating enable
 bindsym $mod+k exec xkill
+
+# ┌──────────────────────────────────────────────────┐
+# │              Scratchpad / Dropdown Terminal        │
+# └──────────────────────────────────────────────────┘
+# Move any window to scratchpad / show scratchpad
+bindsym $mod+minus scratchpad show
+bindsym $mod+Shift+minus move scratchpad
+
+# Dropdown terminal (quake-style)
+for_window [instance="dropdown_term"] floating enable, resize set 1200 700, move position center, move scratchpad
+exec --no-startup-id __NV_PRIME_RENDER_OFFLOAD=1 __GLX_VENDOR_LIBRARY_NAME=nvidia kitty --name dropdown_term
+bindsym $mod+grave [instance="dropdown_term"] scratchpad show, move position center
+
+# ┌──────────────────────────────────────────────────┐
+# │                   Autotiling                      │
+# └──────────────────────────────────────────────────┘
+# Disabled: autotiling conflicts with $mod+w (tabbed) and $mod+e (toggle split)
+# by automatically overriding the layout/split direction
+#exec_always --no-startup-id autotiling
+
+# ┌──────────────────────────────────────────────────┐
+# │              Betterlockscreen Cache               │
+# └──────────────────────────────────────────────────┘
+exec --no-startup-id betterlockscreen -u ~/Pictures/nice.jpg
+
+# ┌──────────────────────────────────────────────────┐
+# │                Misc Improvements                  │
+# └──────────────────────────────────────────────────┘
+focus_wrapping no
+mouse_warping none
+for_window [all] title_window_icon padding 3px
