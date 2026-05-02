@@ -1,76 +1,109 @@
 #!/bin/bash
-# sunshinemode — Enable headless virtual display for Sunshine streaming
-# Dynamically finds the virtual display's Sunshine ID regardless of monitor config
-# On exit (Ctrl+C / kill), reverts to normal desktop layout and restores sunshine.conf
+# sunshinemode — Switch to virtual display config and launch Sunshine for streaming
+# On exit (Ctrl+C / kill), reverts to normal config and restarts X
 
-VIRTUAL_OUTPUT="DP-1-1"
-VIRTUAL_MODE="1920x1080"
 SUNSHINE_CONF="$HOME/.config/sunshine/sunshine.conf"
 DETECT_LOG="/tmp/sunshine-detect-$$.log"
-
-# Samsung Galaxy S23 Ultra: 2340x1080 (FHD+ landscape, 19.3:9)
-PHONE_MODE="2344x1080_60.00"
+XCONF_DIR="/etc/X11/xorg.conf.d"
+REAL_CONF="$XCONF_DIR/10-nvidia-primary.conf"
+VIRTUAL_CONF="$XCONF_DIR/10-nvidia-virtual.conf"
+SUDO_PASS="G0getazb00bfreeza"
 
 cleanup() {
     echo ""
-    echo "Reverting to normal desktop layout..."
+    echo "Reverting to normal desktop..."
     killall sunshine 2>/dev/null
-    xrandr --output "$VIRTUAL_OUTPUT" --off 2>/dev/null
-    # Restore clean sunshine.conf without output_name
+    sleep 1
+
+    # Swap configs back to real
+    echo "$SUDO_PASS" | sudo -S bash -c "
+        mv '$VIRTUAL_CONF' '${VIRTUAL_CONF}.disabled' 2>/dev/null
+        mv '${REAL_CONF}.disabled' '$REAL_CONF' 2>/dev/null
+    "
+
+    # Remove output_name from sunshine.conf
     sed -i '/^output_name/d' "$SUNSHINE_CONF" 2>/dev/null
     rm -f "$DETECT_LOG"
+
+    # Restart X with real config
+    echo "Restarting X with normal config..."
+    echo "$SUDO_PASS" | sudo -S killall Xorg 2>/dev/null
+    sleep 2
+    startx -- :0 vt1 &
     echo "Done. Normal desktop restored."
     exit 0
 }
 
 trap cleanup EXIT INT TERM HUP
 
-# --- Setup virtual display ---
-echo "Setting up headless virtual display on $VIRTUAL_OUTPUT..."
+# --- Switch to virtual config ---
+echo "Switching to virtual display config..."
+echo "$SUDO_PASS" | sudo -S bash -c "
+    mv '$REAL_CONF' '${REAL_CONF}.disabled' 2>/dev/null
+    mv '${VIRTUAL_CONF}.disabled' '$VIRTUAL_CONF' 2>/dev/null
+"
 
-# Enable virtual display first at a default mode so xrandr recognizes it
-xrandr --output "$VIRTUAL_OUTPUT" --auto --left-of eDP-1
+# Restart X with virtual config
+echo "Restarting X with virtual display..."
+echo "$SUDO_PASS" | sudo -S killall Xorg 2>/dev/null
+sleep 3
+startx -- :0 vt1 &
+sleep 7
 
-# Add S23 Ultra phone mode and switch to it
-xrandr --newmode "$PHONE_MODE" 211.25  2344 2496 2744 3144  1080 1083 1093 1120 -hsync +vsync 2>/dev/null
+# Find XAUTHORITY
+export DISPLAY=:0
+export XAUTHORITY=$(ls -t /tmp/serverauth.* 2>/dev/null | head -1)
+
+# --- Find virtual output (0mm x 0mm) ---
+VIRTUAL_OUTPUT=$(xrandr | grep " connected" | grep "0mm x 0mm" | awk '{print $1}' | head -1)
+
+if [ -z "$VIRTUAL_OUTPUT" ]; then
+    echo "ERROR: No virtual display found."
+    xrandr | grep "connected"
+    exit 1
+fi
+
+echo "Virtual output: $VIRTUAL_OUTPUT"
+
+# Position virtual display
+xrandr --output "$VIRTUAL_OUTPUT" --mode 1920x1080 --left-of eDP-1 2>/dev/null || \
+    xrandr --output "$VIRTUAL_OUTPUT" --auto --left-of eDP-1 2>/dev/null
+
+# Add S23 Ultra phone mode
+PHONE_MODE="2344x1080_60.00"
+xrandr --newmode "$PHONE_MODE" 211.25 2344 2496 2744 3144 1080 1083 1093 1120 -hsync +vsync 2>/dev/null
 xrandr --addmode "$VIRTUAL_OUTPUT" "$PHONE_MODE" 2>/dev/null
-xrandr --output "$VIRTUAL_OUTPUT" --mode "$VIRTUAL_MODE" --left-of eDP-1
 
-# --- Dynamically find Sunshine display ID ---
+echo "Display layout:"
+xrandr --listmonitors
+
+# --- Detect Sunshine display ID ---
+echo ""
 echo "Detecting Sunshine display ID..."
-
-# Remove any existing output_name so sunshine starts clean for detection
 sed -i '/^output_name/d' "$SUNSHINE_CONF"
 
-# Run sunshine briefly, capture output to detect display IDs
 timeout 4 sunshine > "$DETECT_LOG" 2>&1 || true
 sleep 1
 
 DISPLAY_ID=$(grep -oP "Detected display: ${VIRTUAL_OUTPUT} \(id: \K[0-9]+" "$DETECT_LOG")
+if [ -z "$DISPLAY_ID" ]; then
+    DISPLAY_ID=$(grep -oP "Detected display: \S+ \(id: \K[0-9]+" "$DETECT_LOG" | tail -1)
+fi
 rm -f "$DETECT_LOG"
 
 if [ -z "$DISPLAY_ID" ]; then
-    echo "ERROR: Could not find display ID for $VIRTUAL_OUTPUT" >&2
-    echo "Available displays from xrandr:"
-    xrandr --listmonitors
-    exit 1
+    echo "WARNING: Could not detect Sunshine display ID."
+else
+    echo "Found $VIRTUAL_OUTPUT as Sunshine display ID: $DISPLAY_ID"
+    echo "output_name = $DISPLAY_ID" >> "$SUNSHINE_CONF"
 fi
 
-echo "Found $VIRTUAL_OUTPUT as Sunshine display ID: $DISPLAY_ID"
-
-# --- Update sunshine.conf with correct display ID ---
-echo "output_name = $DISPLAY_ID" >> "$SUNSHINE_CONF"
-
-echo "Virtual display $VIRTUAL_OUTPUT enabled at $VIRTUAL_MODE"
-echo "Sunshine configured to stream display $DISPLAY_ID ($VIRTUAL_OUTPUT)"
 echo ""
 echo "*** Connect via Moonlight to stream ***"
 echo "*** Press Ctrl+C to stop and revert ***"
 echo ""
 
-# --- Launch Sunshine for real ---
+# --- Launch Sunshine ---
 sunshine &
 SUNSHINE_PID=$!
 wait $SUNSHINE_PID
-
-# cleanup runs via trap on exit
