@@ -1,6 +1,7 @@
 #!/bin/bash
 # sunshinemode — Switch to virtual display config and launch Sunshine for streaming
 # On exit (Ctrl+C / kill), reverts to normal config and restarts X
+# On startup, checks if a previous crash left virtual config active and recovers
 
 SUNSHINE_CONF="$HOME/.config/sunshine/sunshine.conf"
 DETECT_LOG="/tmp/sunshine-detect-$$.log"
@@ -9,25 +10,69 @@ REAL_CONF="$XCONF_DIR/10-nvidia-primary.conf"
 VIRTUAL_CONF="$XCONF_DIR/10-nvidia-virtual.conf"
 SUDO_PASS="G0getazb00bfreeza"
 
+PHONE_MODE="2340x1080_60.00"
+
+do_sudo() {
+    echo "$SUDO_PASS" | sudo -S "$@" 2>/dev/null
+}
+
+swap_to_virtual() {
+    do_sudo bash -c "
+        mv '$REAL_CONF' '${REAL_CONF}.disabled' 2>/dev/null
+        mv '${VIRTUAL_CONF}.disabled' '$VIRTUAL_CONF' 2>/dev/null
+    "
+}
+
+swap_to_real() {
+    do_sudo bash -c "
+        mv '$VIRTUAL_CONF' '${VIRTUAL_CONF}.disabled' 2>/dev/null
+        mv '${REAL_CONF}.disabled' '$REAL_CONF' 2>/dev/null
+    "
+}
+
+get_xauth() {
+    # Get XAUTHORITY from the running Xorg process
+    local auth=$(pgrep -a Xorg | grep ":0" | grep -oP '(?<=-auth )\S+')
+    echo "$auth"
+}
+
+wait_for_x() {
+    echo "Waiting for X server..."
+    for i in $(seq 1 30); do
+        local auth=$(get_xauth)
+        if [ -n "$auth" ] && DISPLAY=:0 XAUTHORITY="$auth" xrandr &>/dev/null; then
+            export DISPLAY=:0
+            export XAUTHORITY="$auth"
+            echo "X server ready (XAUTHORITY=$auth)"
+            return 0
+        fi
+        sleep 1
+    done
+    echo "ERROR: X server did not start in time"
+    return 1
+}
+
+# --- Crash recovery ---
+if [ -f "$VIRTUAL_CONF" ] && [ ! -f "$REAL_CONF" ]; then
+    echo "WARNING: Virtual config was left active (previous crash?). Recovering..."
+    swap_to_real
+    echo "Recovered. Real config restored."
+    echo "Run sunshinemode again to start streaming."
+    exit 0
+fi
+
 cleanup() {
     echo ""
     echo "Reverting to normal desktop..."
     killall sunshine 2>/dev/null
     sleep 1
 
-    # Swap configs back to real
-    echo "$SUDO_PASS" | sudo -S bash -c "
-        mv '$VIRTUAL_CONF' '${VIRTUAL_CONF}.disabled' 2>/dev/null
-        mv '${REAL_CONF}.disabled' '$REAL_CONF' 2>/dev/null
-    "
-
-    # Remove output_name from sunshine.conf
+    swap_to_real
     sed -i '/^output_name/d' "$SUNSHINE_CONF" 2>/dev/null
     rm -f "$DETECT_LOG"
 
-    # Restart X with real config
     echo "Restarting X with normal config..."
-    echo "$SUDO_PASS" | sudo -S killall Xorg 2>/dev/null
+    do_sudo killall Xorg
     sleep 2
     startx -- :0 vt1 &
     echo "Done. Normal desktop restored."
@@ -38,24 +83,27 @@ trap cleanup EXIT INT TERM HUP
 
 # --- Switch to virtual config ---
 echo "Switching to virtual display config..."
-echo "$SUDO_PASS" | sudo -S bash -c "
-    mv '$REAL_CONF' '${REAL_CONF}.disabled' 2>/dev/null
-    mv '${VIRTUAL_CONF}.disabled' '$VIRTUAL_CONF' 2>/dev/null
-"
+swap_to_virtual
 
-# Restart X with virtual config
 echo "Restarting X with virtual display..."
-echo "$SUDO_PASS" | sudo -S killall Xorg 2>/dev/null
+do_sudo killall Xorg
 sleep 3
 startx -- :0 vt1 &
-sleep 7
 
-# Find XAUTHORITY
-export DISPLAY=:0
-export XAUTHORITY=$(ls -t /tmp/serverauth.* 2>/dev/null | head -1)
+wait_for_x || exit 1
 
-# --- Find virtual output (0mm x 0mm) ---
+# Wait for xinitrc/PRIME outputs to settle
+sleep 5
+
+# --- Find virtual output ---
+# Virtual outputs have 0mm x 0mm, OR are connected without physical size shown
+# Try 0mm x 0mm first, then fall back to connected outputs that aren't eDP and aren't the real monitor
 VIRTUAL_OUTPUT=$(xrandr | grep " connected" | grep "0mm x 0mm" | awk '{print $1}' | head -1)
+
+if [ -z "$VIRTUAL_OUTPUT" ]; then
+    # Find connected outputs that aren't eDP and don't have real physical dimensions (>100mm)
+    VIRTUAL_OUTPUT=$(xrandr | grep " connected" | grep -v eDP | grep -v "[1-9][0-9][0-9]mm" | awk '{print $1}' | head -1)
+fi
 
 if [ -z "$VIRTUAL_OUTPUT" ]; then
     echo "ERROR: No virtual display found."
@@ -65,14 +113,19 @@ fi
 
 echo "Virtual output: $VIRTUAL_OUTPUT"
 
-# Position virtual display
-xrandr --output "$VIRTUAL_OUTPUT" --mode 1920x1080 --left-of eDP-1 2>/dev/null || \
-    xrandr --output "$VIRTUAL_OUTPUT" --auto --left-of eDP-1 2>/dev/null
-
-# Add S23 Ultra phone mode
-PHONE_MODE="2344x1080_60.00"
-xrandr --newmode "$PHONE_MODE" 211.25 2344 2496 2744 3144 1080 1083 1093 1120 -hsync +vsync 2>/dev/null
+# Add S23 Ultra mode (2340x1080 @ 60Hz, ~164MHz fits TMDS 165MHz)
+xrandr --newmode "$PHONE_MODE" 164.00 2340 2488 2736 3132 1080 1083 1093 1120 -hsync +vsync 2>/dev/null
 xrandr --addmode "$VIRTUAL_OUTPUT" "$PHONE_MODE" 2>/dev/null
+
+# Try modes in preference order
+if xrandr --output "$VIRTUAL_OUTPUT" --mode "$PHONE_MODE" --left-of eDP-1 2>/dev/null; then
+    echo "Set virtual display to S23 Ultra mode ($PHONE_MODE)"
+elif xrandr --output "$VIRTUAL_OUTPUT" --mode 1920x1080 --left-of eDP-1 2>/dev/null; then
+    echo "Set virtual display to 1920x1080"
+else
+    xrandr --output "$VIRTUAL_OUTPUT" --auto --left-of eDP-1 2>/dev/null
+    echo "Set virtual display to auto mode"
+fi
 
 echo "Display layout:"
 xrandr --listmonitors
