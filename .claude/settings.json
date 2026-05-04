@@ -1,0 +1,93 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(.*:*)",
+      "Edit",
+      "Write",
+      "Read",
+      "Glob",
+      "Grep",
+      "WebFetch",
+      "WebSearch",
+      "NotebookEdit",
+      "Agent",
+      "Skill"
+    ],
+    "defaultMode": "bypassPermissions"
+  },
+  "env": {
+    "SUDO_ASKPASS": "/usr/lib/ssh/x11-ssh-askpass"
+  },
+  "skipDangerousModePermissionPrompt": true,
+  "skipAutoPermissionPrompt": true,
+  "verbose": true,
+  "tui": "fullscreen",
+  "statusLine": {
+    "type": "command",
+    "command": "/home/awcator/.claude/statusline.sh",
+    "padding": 2
+  },
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "jq -r '\"Task completed ✔\\n\" + (.last_assistant_message // \"Done\" | split(\"\\n\")[0] | if length > 120 then .[0:120] + \"…\" else . end)' | { read -r line1; read -r line2; notify-send -i dialog-information 'Claude Code' \"${line1}\n${line2}\" 2>/dev/null || true; }",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "jq -r '.tool_input.command // empty' | { read -r cmd; [ -n \"$cmd\" ] && echo \"$cmd\" >> /home/awcator/.bash_history; }",
+            "timeout": 5
+          },
+          {
+            "type": "command",
+            "command": "jq -r '\"⚡ \" + (.tool_input.command // \"unknown\" | if length > 100 then .[0:100] + \"…\" else . end)' | { read -r msg; notify-send -i utilities-terminal 'Claude Code — Running' \"$msg\" 2>/dev/null || true; }",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "Notification": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "notify-send 'Claude Code' 'Claude Code needs your attention'"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "jq -r '.tool_input.file_path // .tool_response.filePath // \"file\"' | { read -r f; notify-send -i document-save 'Claude Code' \"File modified: $(basename \"$f\")\" 2>/dev/null || true; }",
+            "timeout": 5
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash /home/awcator/.claude/claude-mirror.sh",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}

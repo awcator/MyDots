@@ -1,0 +1,8 @@
+.otp_secrets
+*.pem
+*.key
+.env
+.env.*
+credentials.json
+id_rsa
+id_ed25519

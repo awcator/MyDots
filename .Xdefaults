@@ -15,7 +15,7 @@ URxvt.saveline: 2048
 URxvt.scrollBar: false
 URxvt.scrollBar_right: false
 URxvt.urgentOnBell: true
-URxvt.depth: 24
+URxvt.depth: 32
 URxvt.iso14755: false
 
 !! Common Keybinds for Navigations
@@ -36,14 +36,14 @@ URxvt.keysym.Control-Left: \033[1;5D
 !URxvt.keysym.M-Escape: perl:keyboard-select:activate
 !URxvt.keysym.M-s: perl:keyboard-select:search
 !URxvt.keysym.M-u: perl:url-select:select_next
-URxvt.urlLauncher: firefox
+URxvt.urlLauncher: brave
 URxvt.underlineURLs: true
 URxvt.urlButton: 1
 URxvt*font: xft:Source Code Pro:size=12:antialias=true:hinting=true
-URxvt*boldFont: xft:Source Code Pro:size=14:antialias=true:hinting=true
+URxvt*boldFont: xft:Source Code Pro:size=13:antialias=true:hinting=true
 URxvt.allow_bold: true
-URxvt*italicFont: xft:Source Code Pro:style=Oblique:size=13:antialias=true:hinting=true
-URxvt*boldItalicFont: xft:Source Code Pro:style=Bold Oblique:size=14:antialias=true:hinting=true
+URxvt*italicFont: xft:Source Code Pro:style=Oblique:size=12:antialias=true:hinting=true
+URxvt*boldItalicFont: xft:Source Code Pro:style=Bold Oblique:size=13:antialias=true:hinting=true
 !URxvt.font:                     xft:DejaVu Sans Mono:autohint=true:size=12
 !URxvt.boldFont:                 xft:DejaVu Sans Mono:autohint=true:bold:size=12
 !URxvt.italicFont:               xft:DejaVu Sans Mono:autohint=true:italic:size=12
@@ -55,8 +55,8 @@ URxvt*letterSpace: -2
 URxvt.keysym.Shift-Control-V: eval:paste_clipboard
 URxvt.keysym.Shift-Control-C: eval:selection_to_clipboard
 
-URxvt.transparent:   true
-urxvt*shading: 10
+URxvt.transparent:   false
+!urxvt*shading: 10
 
 
 ! special
@@ -102,10 +102,15 @@ URxvt.matcher.button: 1
 URxvt.keysym.M-e: matcher:last
 !URxvt.matcher.pattern.1: (?i)\\berror\\b
 !# make it red color of matched
-URxvt.matcher.pattern.1: (?i)(FAIL|no|loss|down|crash|tear|remove|unable|miss|unable|not|end|quit|exit|negative|duplicate|delete|error|exception|warning|destroy|fatal|critical|failure|not\s+found|invalid|timeout|timedout|denied|out\s+of\s+memory|caught|exception|failed|refused|unavailable|unsuccessful|unresolved|unhealthy|unstable|broken|wrong|incorrect|bad|failed|not\s+ok|not\s+okay|unsuccessful|404|403|500|502|503|504|400|401|aborted|panic|oops|segfault|core|dump|killed|unhandled|unprocessed|dropped|not\s+responding|forbidden|rejected|unauthorized|corrupt|malformed|broken\s+pipe|connection\s+reset|dead|degraded|terminated|shutdown|orphaned|inconsistent|rollback|conflict|overrun|underrun|overflow|underflow|severe|unexpected|unknown|unsupported|dependency\s+error|assertion|stacktrace)
-URxvt.matcher.pattern.3: (?i)(status|find|work|update|middle|draw|ignore|deprecate|waiting|loading|pending|processing|busy|working|progress|process|queued|initiated|queue|line|processing|executing|mandatory|required|needed|essential|compulsory|indispensable|imperative|vital|necessity|must|should|need|have\s+to|got\s+to|ought\s+to|supposed|be\s+to|be\s+supposed\s+to|initializing|preparing|warming\s+up|booting|scheduled|queuing|spawning|retrying|reconnecting|resuming|pausing|sleeping|idling|monitoring|tracing|logging|migrating|syncing|flushing|rotating|checkpoint|notifier|observer|listener|handler|dispatcher|thread|worker|heartbeat|keepalive|apply|transition|contin|eval|unused)
-URxvt.matcher.pattern.2: (?i)(PASS|found|install|deploy|win|up|able|start|success|passed|postive|complete|create|available|ready|connected|running|valid|approved|enabled|authorized|granted|active|resolved|healthy|stable|worked|succeeded|accepted|correct|good|fine|ok|okay|successful|200|201|204|202|203|done|finished|operational|restored|started\s+successfully|listening|bound|up\s+and\s+running|validated|verified|consistent|synced|upgraded|initialized|registered|confirmed|acknowledged|delivered|recovered|fixed|patched|committed)
+URxvt.matcher.pattern.2: (?i)(PASS|NOERROR|noterror|found|install|deploy|win|up|able|start|success|passed|postive|complete|create|available|ready|connected|running|valid|approved|enabled|authorized|granted|active|resolved|healthy|stable|worked|succeeded|accepted|correct|good|fine|ok|okay|successful|200|201|204|202|203|done|finished|operational|restored|started\s+successfully|listening|bound|up\s+and\s+running|validated|verified|consistent|synced|upgraded|initialized|registered|confirmed|acknowledged|delivered|recovered|fixed|patched|committed)
+URxvt.matcher.pattern.1: (?i)(FAIL|NXDOMAIN|no(?!error\\b)|loss|down|crash|tear|remove|unable|miss|unable|not|end|quit|exit|negative|duplicate|delete|(?<!no)(?<!not)error|exception|warning|destroy|fatal|critical|failure|not\s+found|invalid|timeout|timedout|denied|out\s+of\s+memory|caught|exception|failed|refused|unavailable|unsuccessful|unresolved|unhealthy|unstable|broken|wrong|incorrect|bad|failed|not\s+ok|not\s+okay|unsuccessful|404|403|500|502|503|504|400|401|aborted|panic|oops|segfault|core|dump|killed|unhandled|unprocessed|dropped|not\s+responding|forbidden|rejected|unauthorized|corrupt|malformed|broken\s+pipe|connection\s+reset|dead|degraded|terminated|shutdown|orphaned|inconsistent|rollback|conflict|overrun|underrun|overflow|underflow|severe|unexpected|unknown|unsupported|dependency\s+error|assertion|stacktrace)
+URxvt.matcher.pattern.3: (?i)(load|status|find|work|update|middle|draw|ignore|deprecate|waiting|loading|pending|processing|busy|working|progress|process|queued|initiated|queue|line|processing|executing|mandatory|required|needed|essential|compulsory|indispensable|imperative|vital|necessity|must|should|need|have\s+to|got\s+to|ought\s+to|supposed|be\s+to|be\s+supposed\s+to|initializing|preparing|warming\s+up|booting|scheduled|queuing|spawning|retrying|reconnecting|resuming|pausing|sleeping|idling|monitoring|tracing|logging|migrating|syncing|flushing|rotating|checkpoint|notifier|observer|listener|handler|dispatcher|thread|worker|heartbeat|keepalive|apply|transition|contin|eval|unused)
+
+URxvt.matcher.pattern.4:  \\B(/\\S+?):(\\d+)(?=:|$)
+URxvt.matcher.launcher.4: vim +$2 $1
+
 URxvt.matcher.rend.1: Bold fg3
 URxvt.matcher.rend.3: Bold fg5
 URxvt.matcher.rend.2: Bold fg4
+URxvt.matcher.rend.4: Bold fg6
 

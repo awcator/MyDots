@@ -1,0 +1,54 @@
+#!/usr/bin/env bash
+# pre-push hook — block push if sensitive content is detected
+# Install: cp this to .git/hooks/pre-push && chmod +x .git/hooks/pre-push
+
+RED='\033[0;31m'
+NC='\033[0m'
+
+# Patterns that should NEVER be pushed
+PATTERNS=(
+    '[0-9a-f]\{8\}-[0-9a-f]\{4\}-[0-9a-f]\{4\}-[0-9a-f]\{4\}-[0-9a-f]\{12\}'  # UUIDs (tokens)
+    'sk-[a-zA-Z0-9]\{20,\}'          # API keys (sk-...)
+    'AKIA[0-9A-Z]\{16\}'             # AWS access keys
+    'password\s*=\s*[^$]'            # Hardcoded passwords
+    'BEGIN.*PRIVATE KEY'             # Private keys
+    'ghp_[a-zA-Z0-9]\{36\}'         # GitHub tokens
+    'xox[baprs]-[a-zA-Z0-9-]\+'    # Slack tokens
+    'oathtool.*--totp [A-Z2-7]\{16,\}'  # TOTP secrets (base32 seeds)
+    '[A-Z2-7]\{16,52\}'             # Raw base32 secrets (16+ chars)
+)
+
+FOUND=0
+
+for pattern in "${PATTERNS[@]}"; do
+    matches=$(git diff --cached --diff-filter=d -U0 HEAD 2>/dev/null | grep -i "^+" | grep -v "^+++" | grep "$pattern" || true)
+    if [[ -z "$matches" ]]; then
+        # Also check staged files directly
+        matches=$(git grep -l "$pattern" -- ':!.git' 2>/dev/null || true)
+    fi
+    if [[ -n "$matches" ]]; then
+        echo -e "${RED}[BLOCKED]${NC} Potential secret detected matching pattern:"
+        echo "  $pattern"
+        echo "$matches" | head -5
+        echo ""
+        FOUND=1
+    fi
+done
+
+# Check specific known sensitive files
+SENSITIVE_FILES=(".env" "credentials.json" "*.pem" "*.key" "id_rsa" "id_ed25519")
+for pat in "${SENSITIVE_FILES[@]}"; do
+    found=$(git ls-files "$pat" 2>/dev/null)
+    if [[ -n "$found" ]]; then
+        echo -e "${RED}[BLOCKED]${NC} Sensitive file tracked: $found"
+        FOUND=1
+    fi
+done
+
+if [[ $FOUND -eq 1 ]]; then
+    echo ""
+    echo -e "${RED}Push blocked!${NC} Remove secrets or use: git push --no-verify (at your own risk)"
+    exit 1
+fi
+
+exit 0

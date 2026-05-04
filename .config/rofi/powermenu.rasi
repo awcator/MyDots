@@ -1,0 +1,140 @@
+/**
+ * Power Menu — Fullscreen Blur
+ * For use with: rofi -dmenu -theme powermenu.rasi
+ **/
+
+/*****----- Configuration -----*****/
+configuration {
+    show-icons: false;
+}
+
+/*****----- Global Properties -----*****/
+* {
+    font: "JetBrainsMono Nerd Font 14";
+
+    /* Colors — dark translucent */
+    background:     #0a0a0aCC;
+    background-alt: #1a1a1aDD;
+    foreground:     #d0d0d0;
+    selected:       #5bb1b4EE;
+    selected-fg:    #0a0a0a;
+    active:         #5bb1b4;
+    urgent:         #e06c75;
+}
+
+/*****----- Main Window -----*****/
+window {
+    transparency: "real";
+    location:     center;
+    anchor:       center;
+    fullscreen:   true;
+    cursor:       "default";
+
+    background-color: @background;
+}
+
+/*****----- Main Box -----*****/
+mainbox {
+    enabled:          true;
+    spacing:          30px;
+    padding:          0;
+    background-color: transparent;
+    children:         [ "dummy", "inputbar", "listview", "message", "dummy" ];
+}
+
+/*****----- Inputbar -----*****/
+inputbar {
+    enabled:          true;
+    spacing:          15px;
+    padding:          0;
+    background-color: transparent;
+    text-color:       @foreground;
+    children:         [ "dummy", "textbox-prompt-colon", "prompt", "dummy" ];
+}
+textbox-prompt-colon {
+    enabled:          true;
+    expand:           false;
+    str:              "⚡ POWER";
+    font:             "JetBrainsMono Nerd Font 36";
+    background-color: transparent;
+    text-color:       @active;
+    vertical-align:   0.5;
+    horizontal-align: 0.5;
+}
+prompt {
+    enabled:          false;
+}
+
+/*****----- Dummy (spacer) -----*****/
+dummy {
+    background-color: transparent;
+}
+
+/*****----- Listview -----*****/
+listview {
+    enabled:       true;
+    columns:       5;
+    lines:         1;
+    cycle:         true;
+    dynamic:       true;
+    scrollbar:     false;
+    layout:        vertical;
+    reverse:       false;
+    fixed-height:  true;
+    fixed-columns: true;
+
+    spacing:          30px;
+    padding:          40px 100px;
+    background-color: transparent;
+    cursor:           "default";
+}
+
+/*****----- Elements -----*****/
+element {
+    enabled:          true;
+    spacing:          20px;
+    padding:          40px 20px;
+    border-radius:    20px;
+    background-color: @background-alt;
+    text-color:       @foreground;
+    cursor:           pointer;
+    orientation:      vertical;
+}
+element selected.normal {
+    background-color: @selected;
+    text-color:       @selected-fg;
+}
+element-icon {
+    background-color: transparent;
+    text-color:       inherit;
+    size:             64px;
+    cursor:           inherit;
+}
+element-text {
+    font:             "JetBrainsMono Nerd Font 22";
+    background-color: transparent;
+    text-color:       inherit;
+    cursor:           inherit;
+    vertical-align:   0.5;
+    horizontal-align: 0.5;
+}
+
+/*****----- Message -----*****/
+message {
+    enabled:          true;
+    padding:          0 200px;
+    background-color: transparent;
+}
+textbox {
+    font:             "JetBrainsMono Nerd Font 12";
+    background-color: transparent;
+    text-color:       #666666;
+    vertical-align:   0.5;
+    horizontal-align: 0.5;
+}
+error-message {
+    padding:          15px;
+    border-radius:    20px;
+    background-color: @background;
+    text-color:       @foreground;
+}

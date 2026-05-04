@@ -1,0 +1,51 @@
+#!/bin/bash
+# sunshinemode-headless — True virtual display for Sunshine/Moonlight streaming.
+# No physical screen output. Uses xf86-video-dummy VIRTUAL1 output.
+#
+# Requirements (one-time setup):
+#   sudo pacman -S xf86-video-dummy          # Arch
+#   sudo apt install xserver-xorg-video-dummy # Debian/Ubuntu
+#
+#   Create /etc/X11/xorg.conf.d/20-dummy.conf:
+#   ----------------------------------------
+#   Section "Device"
+#       Identifier "dummy"
+#       Driver     "dummy"
+#       VideoRam   256000
+#   EndSection
+#   ----------------------------------------
+#   Then restart your display manager. VIRTUAL1 will appear in xrandr.
+
+set -euo pipefail
+
+MODE_NAME="2344x1080_60.00"
+# Samsung Galaxy S23 Ultra: 2340x1080 — CVT-rounded to 2344 for timing
+# VAAPI aligns internally to 2368 (64-byte boundary), this is fine
+MODE_LINE="211.25  2344 2496 2744 3144  1080 1083 1093 1120 -hsync +vsync"
+
+# --- Preflight: verify VIRTUAL1 exists ---
+VIRTUAL_OUT=$(xrandr 2>/dev/null | awk '/^VIRTUAL/{print $1; exit}')
+if [ -z "$VIRTUAL_OUT" ]; then
+    echo "ERROR: No VIRTUAL output found." >&2
+    echo "Install xf86-video-dummy and create /etc/X11/xorg.conf.d/20-dummy.conf" >&2
+    echo "See comments at the top of this script for instructions." >&2
+    exit 1
+fi
+echo "Found virtual output: $VIRTUAL_OUT"
+
+# --- Turn off all physical outputs ---
+ALL_OUTPUTS=$(xrandr 2>/dev/null | awk '/^[A-Z].*connected/{print $1}')
+for out in $ALL_OUTPUTS; do
+    [[ "$out" == "$VIRTUAL_OUT" ]] && continue
+    echo "Disabling physical output: $out"
+    xrandr --output "$out" --off 2>/dev/null || true
+done
+
+# --- Set up virtual display at stream resolution ---
+xrandr --newmode "$MODE_NAME" $MODE_LINE 2>/dev/null || true
+xrandr --addmode "$VIRTUAL_OUT" "$MODE_NAME" 2>/dev/null || true
+xrandr --output "$VIRTUAL_OUT" --mode "$MODE_NAME" --pos 0x0
+echo "Virtual display set: $MODE_NAME on $VIRTUAL_OUT"
+
+# --- Launch Sunshine ---
+exec sunshine

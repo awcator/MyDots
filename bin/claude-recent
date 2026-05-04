@@ -1,0 +1,240 @@
+#!/usr/bin/env bash
+# claude-recent — Interactive scrollable recent Claude Code sessions
+# Usage: claude-recent [count]   (default: 10 recent sessions)
+
+HISTORY="$HOME/.claude/history.jsonl"
+PROJECTS="$HOME/.claude/projects"
+# Auto-calculate visible items based on terminal height
+# Each item = 5 lines, header = 3 lines, footer = 2 lines
+TERM_HEIGHT=$(tput lines 2>/dev/null || echo 24)
+AUTO_VISIBLE=$(( (TERM_HEIGHT - 5) / 5 ))
+((AUTO_VISIBLE < 2)) && AUTO_VISIBLE=2
+VISIBLE="${1:-$AUTO_VISIBLE}"
+
+# Colors
+CYAN='\033[36m'
+DIM='\033[2m'
+BOLD='\033[1m'
+YELLOW='\033[33m'
+GREEN='\033[32m'
+MAGENTA='\033[35m'
+RESET='\033[0m'
+BG_HIGHLIGHT='\033[44m'  # Blue background for selected item
+WHITE='\033[97m'
+
+if [[ ! -f "$HISTORY" ]]; then
+    echo "No Claude history found."
+    exit 1
+fi
+
+# Get unique recent sessions
+sessions=$(jq -s '
+    group_by(.sessionId)
+    | map({
+        sessionId: .[0].sessionId,
+        project: .[-1].project,
+        display: .[0].display,
+        timestamp: .[-1].timestamp
+    })
+    | sort_by(-.timestamp)
+' "$HISTORY" 2>/dev/null)
+
+if [[ -z "$sessions" || "$sessions" == "[]" ]]; then
+    echo "No recent sessions found."
+    exit 1
+fi
+
+count=$(echo "$sessions" | jq 'length')
+
+# Format relative time
+relative_time() {
+    local ts_ms="$1"
+    local now_s=$(date +%s)
+    local ts_s=$((ts_ms / 1000))
+    local diff=$((now_s - ts_s))
+
+    if ((diff < 60)); then
+        echo "just now"
+    elif ((diff < 3600)); then
+        echo "$((diff / 60))m ago"
+    elif ((diff < 86400)); then
+        echo "$((diff / 3600))h ago"
+    elif ((diff < 604800)); then
+        echo "$((diff / 86400))d ago"
+    else
+        date -d "@$ts_s" '+%b %d' 2>/dev/null || date -r "$ts_s" '+%b %d' 2>/dev/null
+    fi
+}
+
+# Resolve slug and git branch for a session
+get_session_info() {
+    local sid="$1"
+    local jsonl_file
+    jsonl_file=$(find "$PROJECTS" -name "${sid}.jsonl" -type f 2>/dev/null | head -1)
+    if [[ -n "$jsonl_file" ]]; then
+        local slug branch
+        slug=$(grep -o '"slug":"[^"]*"' "$jsonl_file" 2>/dev/null | tail -1 | cut -d'"' -f4)
+        branch=$(grep -o '"gitBranch":"[^"]*"' "$jsonl_file" 2>/dev/null | tail -1 | cut -d'"' -f4)
+        echo "${slug}|${branch}"
+    else
+        echo "|"
+    fi
+}
+
+# Pre-fetch all session data into arrays
+declare -a SIDS SLUGS DISPLAYS TIMES PROJECTS_SHORT PROJECTS_RAW BRANCHES
+for ((i=0; i<count; i++)); do
+    SIDS[$i]=$(echo "$sessions" | jq -r ".[$i].sessionId")
+    project=$(echo "$sessions" | jq -r ".[$i].project")
+    display=$(echo "$sessions" | jq -r ".[$i].display")
+    timestamp=$(echo "$sessions" | jq -r ".[$i].timestamp")
+
+    info=$(get_session_info "${SIDS[$i]}")
+    SLUGS[$i]="${info%%|*}"
+    BRANCHES[$i]="${info##*|}"
+    TIMES[$i]=$(relative_time "$timestamp")
+    PROJECTS_RAW[$i]="$project"
+    PROJECTS_SHORT[$i]="${project/#$HOME/\~}"
+
+    DISPLAYS[$i]="$display"
+done
+
+# --- Interactive TUI ---
+
+selected=0
+scroll_top=0  # First visible item index
+
+# Hide cursor, enable alternate screen
+tput civis 2>/dev/null
+trap 'tput cnorm 2>/dev/null; stty sane 2>/dev/null' EXIT INT TERM
+
+draw() {
+    # Move cursor to top and clear
+    printf '\033[H\033[2J'
+
+    # Calculate visible window
+    local win_end=$((scroll_top + VISIBLE))
+    ((win_end > count)) && win_end=$count
+
+    echo ""
+    echo -e "  ${BOLD}Claude Sessions${RESET}  ${DIM}↑↓/jk q${RESET}"
+
+    # Scroll indicator top
+    if ((scroll_top > 0)); then
+        echo -e "   ${DIM}⬆️  $scroll_top more above${RESET}"
+    else
+        echo ""
+    fi
+
+    for ((i=scroll_top; i<win_end; i++)); do
+        local idx=$((i + 1))
+        local slug="${SLUGS[$i]}"
+        local time_ago="${TIMES[$i]}"
+        local display="${DISPLAYS[$i]}"
+        local sid="${SIDS[$i]}"
+        local proj="${PROJECTS_SHORT[$i]}"
+        local branch="${BRANCHES[$i]}"
+
+        if ((i == selected)); then
+            # Highlighted row
+            printf "  ${BG_HIGHLIGHT}${WHITE}${BOLD}👉 %2d)  " "$idx"
+            if [[ -n "$slug" ]]; then
+                printf "%s" "$slug"
+            else
+                printf "(untitled)"
+            fi
+            printf "  🕐 %s${RESET}\n" "$time_ago"
+            printf "  ${BG_HIGHLIGHT}${WHITE}       💬 %s${RESET}\n" "$display"
+            if [[ -n "$branch" ]]; then
+                printf "  ${BG_HIGHLIGHT}${WHITE}       🌿 %s${RESET}" "$branch"
+            else
+                printf "  ${BG_HIGHLIGHT}${WHITE}       ${RESET}"
+            fi
+            printf "  ${BG_HIGHLIGHT}${WHITE}📂 %s${RESET}\n" "$proj"
+            printf "  ${BG_HIGHLIGHT}${WHITE}       🔄 claude --resume %s${RESET}\n" "$sid"
+        else
+            printf "  ${DIM} ${RESET} ${YELLOW}%2d)${RESET}  " "$idx"
+            if [[ -n "$slug" ]]; then
+                printf "${CYAN}${BOLD}%s${RESET}" "$slug"
+            else
+                printf "${DIM}(untitled)${RESET}"
+            fi
+            printf "  ${DIM}🕐 %s${RESET}\n" "$time_ago"
+            printf "       ${DIM}💬 %s${RESET}\n" "$display"
+            if [[ -n "$branch" ]]; then
+                printf "       ${GREEN}🌿 %s${RESET}" "$branch"
+            else
+                printf "       "
+            fi
+            printf "  ${MAGENTA}📂 %s${RESET}\n" "$proj"
+            printf "       ${DIM}🔄 claude --resume %s${RESET}\n" "$sid"
+        fi
+        echo ""
+    done
+
+    # Scroll indicator bottom
+    local remaining=$((count - win_end))
+    if ((remaining > 0)); then
+        echo -e "   ${DIM}⬇️  $remaining more below${RESET}"
+    fi
+
+    echo -e "   ${DIM}📋 Showing $((scroll_top+1))–${win_end} of ${count} sessions${RESET}"
+}
+
+# Initial draw
+draw
+
+# Read keypresses
+while true; do
+    # Read a single character (raw mode)
+    IFS= read -rsn1 key
+
+    case "$key" in
+        $'\x1b')
+            # Escape sequence — read next two chars
+            read -rsn2 -t 0.1 seq
+            case "$seq" in
+                '[A') # Up arrow
+                    ((selected > 0)) && ((selected--))
+                    ((selected < scroll_top)) && scroll_top=$selected
+                    ;;
+                '[B') # Down arrow
+                    ((selected < count - 1)) && ((selected++))
+                    ((selected >= scroll_top + VISIBLE)) && ((scroll_top++))
+                    ;;
+                '') # Bare Escape
+                    tput cnorm 2>/dev/null
+                    echo ""
+                    exit 0
+                    ;;
+            esac
+            ;;
+        'k') # vim up
+            ((selected > 0)) && ((selected--))
+            ((selected < scroll_top)) && scroll_top=$selected
+            ;;
+        'j') # vim down
+            ((selected < count - 1)) && ((selected++))
+            ((selected >= scroll_top + VISIBLE)) && ((scroll_top++))
+            ;;
+        '') # Enter
+            tput cnorm 2>/dev/null
+            echo ""
+            resume_dir="${PROJECTS_RAW[$selected]}"
+            if [[ -d "$resume_dir" ]]; then
+                cd "$resume_dir" && exec claude --resume "${SIDS[$selected]}"
+            else
+                echo "⚠️  Project directory not found: $resume_dir"
+                echo "Trying from current directory..."
+                exec claude --resume "${SIDS[$selected]}"
+            fi
+            ;;
+        'q') # Quit
+            tput cnorm 2>/dev/null
+            echo ""
+            exit 0
+            ;;
+    esac
+
+    draw
+done

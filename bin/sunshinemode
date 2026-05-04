@@ -96,12 +96,17 @@ wait_for_x || exit 1
 sleep 5
 
 # --- Find virtual output ---
-# Virtual outputs have 0mm x 0mm, OR are connected without physical size shown
-# Try 0mm x 0mm first, then fall back to connected outputs that aren't eDP and aren't the real monitor
-VIRTUAL_OUTPUT=$(xrandr | grep " connected" | grep "0mm x 0mm" | awk '{print $1}' | head -1)
-
+# Pick the virtual output that supports 1920x1080 (better than 1024x768-only ones)
+# Virtual outputs: connected, not eDP, no real physical dimensions
+VIRTUAL_OUTPUT=""
+for out in $(xrandr | grep " connected" | grep -v eDP | grep -v "[1-9][0-9][0-9]mm" | awk '{print $1}'); do
+    if xrandr | grep -A5 "^${out} " | grep -q "1920x1080"; then
+        VIRTUAL_OUTPUT="$out"
+        break
+    fi
+done
+# Fallback: any virtual output
 if [ -z "$VIRTUAL_OUTPUT" ]; then
-    # Find connected outputs that aren't eDP and don't have real physical dimensions (>100mm)
     VIRTUAL_OUTPUT=$(xrandr | grep " connected" | grep -v eDP | grep -v "[1-9][0-9][0-9]mm" | awk '{print $1}' | head -1)
 fi
 
@@ -113,15 +118,22 @@ fi
 
 echo "Virtual output: $VIRTUAL_OUTPUT"
 
+# Turn off other virtual outputs to free CRTCs
+for out in $(xrandr | grep " connected" | grep -v eDP | grep -v "[1-9][0-9][0-9]mm" | awk '{print $1}'); do
+    if [ "$out" != "$VIRTUAL_OUTPUT" ]; then
+        xrandr --output "$out" --off 2>/dev/null
+    fi
+done
+
 # Add S23 Ultra mode (2340x1080 @ 60Hz, ~164MHz fits TMDS 165MHz)
 xrandr --newmode "$PHONE_MODE" 164.00 2340 2488 2736 3132 1080 1083 1093 1120 -hsync +vsync 2>/dev/null
 xrandr --addmode "$VIRTUAL_OUTPUT" "$PHONE_MODE" 2>/dev/null
 
-# Try modes in preference order
-if xrandr --output "$VIRTUAL_OUTPUT" --mode "$PHONE_MODE" --left-of eDP-1 2>/dev/null; then
-    echo "Set virtual display to S23 Ultra mode ($PHONE_MODE)"
-elif xrandr --output "$VIRTUAL_OUTPUT" --mode 1920x1080 --left-of eDP-1 2>/dev/null; then
-    echo "Set virtual display to 1920x1080"
+# Try modes: 1920x1080 best for S23 Ultra (scales perfectly), then phone mode, then auto
+if xrandr --output "$VIRTUAL_OUTPUT" --mode 1920x1080 --left-of eDP-1 2>/dev/null; then
+    echo "Set virtual display to 1920x1080 (fits S23 Ultra)"
+elif xrandr --output "$VIRTUAL_OUTPUT" --mode "$PHONE_MODE" --left-of eDP-1 2>/dev/null; then
+    echo "Set virtual display to S23 Ultra native ($PHONE_MODE)"
 else
     xrandr --output "$VIRTUAL_OUTPUT" --auto --left-of eDP-1 2>/dev/null
     echo "Set virtual display to auto mode"

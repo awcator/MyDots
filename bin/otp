@@ -1,2 +1,13 @@
 #!/bin/bash
-echo "Example `oathtool -b --totp cxxxxx`" |awk '{ printf "%-20s %-40s\n", $1, $2}'
+echo "--------------------awcator--------------------------"
+echo "Philips `oathtool -b --totp ${OTP_PHILIPS}`" |awk '{ printf "%-20s %-40s\n", $1, $2}'
+echo "Facebook `oathtool -b --totp ${OTP_FACEBOOK}`" |awk '{ printf "%-20s %-40s\n", $1, $2}'
+echo "Slack `oathtool -b --totp ${OTP_SLACK}`" |awk '{ printf "%-20s %-40s\n", $1, $2}'
+echo "Google `oathtool -b --totp ${OTP_GOOGLE}`" |awk '{ printf "%-20s %-40s\n", $1, $2}'
+echo "GitHub `oathtool -b --totp ${OTP_GITHUB}`" |awk '{ printf "%-20s %-40s\n", $1, $2}'
+echo "HSDP `oathtool -b --totp ${OTP_HSDP}`" |awk '{ printf "%-20s %-40s\n", $1, $2}'
+echo "Bitwarden `oathtool -b --totp ${OTP_BITWARDEN}`" |awk '{ printf "%-20s %-40s\n", $1, $2}'
+echo "fleetmangement `oathtool -b --totp ${OTP_FLEET}`" |awk '{ printf "%-20s %-40s\n", $1, $2}'
+echo "--------------------BT--------------------------------"
+echo "BITCOIN `oathtool -b --totp ${OTP_BITCOIN}`" |awk '{ printf "%-20s %-40s\n", $1, $2}'
+echo "GitHub_BT `oathtool -b --totp ${OTP_GITHUB_BT}`" |awk '{ printf "%-20s %-40s\n", $1, $2}'

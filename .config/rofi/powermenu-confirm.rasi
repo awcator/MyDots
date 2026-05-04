@@ -1,0 +1,25 @@
+/**
+ * Power Menu — Confirmation Dialog
+ * Inherits from powermenu.rasi with overrides for confirm layout
+ **/
+
+@import "powermenu.rasi"
+
+listview {
+    columns:       2;
+    lines:         1;
+    padding:       40px 350px;
+}
+
+element {
+    padding: 30px 20px;
+}
+
+element-text {
+    font: "JetBrainsMono Nerd Font 20";
+}
+
+textbox-prompt-colon {
+    str:  "CONFIRM";
+    font: "JetBrainsMono Nerd Font 30";
+}
