@@ -1,0 +1,30 @@
+#!/bin/bash
+# Launch Claude Code using local Ollama models via the proxy
+# Usage: claude-local [claude args...]
+# Make sure ollama-anthropic-proxy.py is running first!
+
+PROXY_PORT="${OLLAMA_PROXY_PORT:-8082}"
+PROXY_URL="http://localhost:${PROXY_PORT}"
+
+# Check if proxy is running
+if ! curl -s "$PROXY_URL/health" >/dev/null 2>&1; then
+    echo "ERROR: Ollama proxy not running at $PROXY_URL"
+    echo "Start it first: python3 ~/bin/ollama-anthropic-proxy.py --model llama3:instruct"
+    exit 1
+fi
+
+MODEL=$(curl -s "$PROXY_URL/health" 2>/dev/null | python3 -c "import sys,json; print(json.load(sys.stdin).get('model','local'))" 2>/dev/null || echo "local")
+echo "Using local model: $MODEL via $PROXY_URL"
+
+export ANTHROPIC_BASE_URL="$PROXY_URL"
+export ANTHROPIC_API_KEY="sk-fake-local"
+export ANTHROPIC_AUTH_TOKEN="sk-fake-local"
+export ANTHROPIC_MODEL="$MODEL"
+export ANTHROPIC_DEFAULT_SONNET_MODEL="$MODEL"
+export ANTHROPIC_DEFAULT_HAIKU_MODEL="$MODEL"
+export ANTHROPIC_SMALL_FAST_MODEL="$MODEL"
+
+# Unset copilot-related vars
+unset GITHUB_COPILOT_TOKEN 2>/dev/null
+
+exec claude "$@"

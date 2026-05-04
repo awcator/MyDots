@@ -70,8 +70,11 @@ alias ??='function _aianswer(){ echo -e "\e[31mpollinations: \e[0m"; tgpt --prov
 alias shitgitundoncommits="git reset --hard HEAD~2"
 alias shitgitsqushcommits="git reset --soft HEAD~5"
 alias shitgiterasefilehistory="git filter-branch --force --index-filter 'git rm --cached --ignore-unmatch my_sensitiveFile' --prune-empty --tag-name-filter cat 01c859dd7d34017efe4a722734b2eee80ed10c64..HEAD"
+alias shitgitundo="git reset --hard; git clean -xffd"
 alias clamdscan="clamdscan -m -i --move=/home/awcator/Documents/infected "
 alias quickreboot="sudo kexec -l /boot/vmlinuz-linux --initrd=/boot/initramfs-linux.img --reuse-cmdline && sudo kexec -e"
 alias wtf='sudo !!'
 alias catall="tail -n +1"
 alias tree="tree -C -h --dirsfirst -F"
+alias short_grep='grep -R -o -P ".{0,20}sloginName.{0,20}"'
+alias cr="claude-recent"

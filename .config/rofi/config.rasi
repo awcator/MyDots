@@ -1,0 +1,8 @@
+configuration {
+    show-icons: true;
+    display-drun: "Apps";
+    display-run: "Run";
+    display-window: "Windows";
+}
+
+@theme "style-6"
