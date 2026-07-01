@@ -1,4 +1,12 @@
 {
+  "env": {
+    "SUDO_ASKPASS": "/home/awcator/.local/bin/claude-askpass",
+    "TMUX_TMPDIR": "/var/tmp",
+    "PLAYWRIGHT_MCP_EXECUTABLE_PATH": "/sbin/brave",
+    "PLAYWRIGHT_MCP_NO_SANDBOX":"1",
+    "PLAYWRIGHT_MCP_SHARED_BROWSER_CONTEXT": "1",
+    "PLAYWRIGHT_MCP_USER_DATA_DIR": "/home/awcator/.config/BraveSoftware/Brave-Browser"
+  },
   "permissions": {
     "allow": [
       "Bash(.*:*)",
@@ -14,18 +22,6 @@
       "Skill"
     ],
     "defaultMode": "bypassPermissions"
-  },
-  "env": {
-    "SUDO_ASKPASS": "/usr/lib/ssh/x11-ssh-askpass"
-  },
-  "skipDangerousModePermissionPrompt": true,
-  "skipAutoPermissionPrompt": true,
-  "verbose": true,
-  "tui": "fullscreen",
-  "statusLine": {
-    "type": "command",
-    "command": "/home/awcator/.claude/statusline.sh",
-    "padding": 2
   },
   "hooks": {
     "Stop": [
@@ -89,5 +85,17 @@
         ]
       }
     ]
+  },
+  "statusLine": {
+    "type": "command",
+    "command": "/home/awcator/.claude/statusline.sh",
+    "padding": 2
+  },
+  "tui": "fullscreen",
+  "skipDangerousModePermissionPrompt": true,
+  "verbose": true,
+  "skipAutoPermissionPrompt": true,
+  "enabledPlugins": {
+    "playwright@claude-plugins-official": true
   }
 }

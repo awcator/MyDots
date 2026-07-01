@@ -1,0 +1,50 @@
+#!/bin/bash
+# Fix external monitor positioning
+# Usage: fixMonitor [right|left|above|below]
+# Default: right
+
+POSITION="${1:-right}"
+
+# Find the primary (laptop) display
+PRIMARY=$(xrandr --current | grep ' connected' | grep 'eDP' | awk '{print $1}')
+if [ -z "$PRIMARY" ]; then
+    PRIMARY=$(xrandr --current | grep ' connected primary' | awk '{print $1}')
+fi
+
+# Find the external display (non-eDP connected monitor)
+EXTERNAL=$(xrandr --current | grep ' connected' | grep -v 'eDP' | awk '{print $1}')
+
+if [ -z "$EXTERNAL" ]; then
+    echo "No external monitor detected."
+    exit 1
+fi
+
+if [ -z "$PRIMARY" ]; then
+    echo "No primary (laptop) monitor detected."
+    exit 1
+fi
+
+echo "Primary: $PRIMARY"
+echo "External: $EXTERNAL"
+echo "Position: $POSITION"
+
+case "$POSITION" in
+    right)
+        xrandr --output "$EXTERNAL" --auto --right-of "$PRIMARY"
+        ;;
+    left)
+        xrandr --output "$EXTERNAL" --auto --left-of "$PRIMARY"
+        ;;
+    above|top|up)
+        xrandr --output "$EXTERNAL" --auto --above "$PRIMARY"
+        ;;
+    below|bottom|down)
+        xrandr --output "$EXTERNAL" --auto --below "$PRIMARY"
+        ;;
+    *)
+        echo "Usage: fixMonitor [right|left|above|below|top|bottom|up|down]"
+        exit 1
+        ;;
+esac
+
+echo "Done. $EXTERNAL placed $POSITION of $PRIMARY"

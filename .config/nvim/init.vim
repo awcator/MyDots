@@ -16,7 +16,6 @@ au VimLeave * call nvim_cursor_set_shape("vertical-bar")
 set cursorline
 se mouse+=a
 color desert
-set guioptions+=a
 set clipboard+=unnamedplus
 vnoremap <C-c> "+y
 map <C-v> "+gP

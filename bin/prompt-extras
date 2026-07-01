@@ -1,0 +1,51 @@
+#!/usr/bin/env bash
+# prompt-extras: Show exit code, exec time, background jobs, docker containers for PS1.
+# Usage: $(prompt-extras $? \j $PROMPT_EXEC_TIME) in PS1
+# Args: $1=exit_code  $2=jobs_count  $3=exec_time_seconds
+
+set -o pipefail
+
+exit_code="${1:-0}"
+jobs_count="${2:-0}"
+exec_time="${3:-0}"
+
+output=""
+
+# --- Non-zero exit code ---
+if [[ "$exit_code" -ne 0 ]]; then
+  output+=" ✗${exit_code}"
+fi
+
+# --- Command execution time (only if >= 5 seconds) ---
+if [[ "$exec_time" -ge 5 ]]; then
+  if [[ "$exec_time" -ge 3600 ]]; then
+    hours=$((exec_time / 3600))
+    mins=$(( (exec_time % 3600) / 60 ))
+    secs=$((exec_time % 60))
+    output+=" ⏱${hours}h${mins}m${secs}s"
+  elif [[ "$exec_time" -ge 60 ]]; then
+    mins=$((exec_time / 60))
+    secs=$((exec_time % 60))
+    output+=" ⏱${mins}m${secs}s"
+  else
+    output+=" ⏱${exec_time}s"
+  fi
+fi
+
+# --- Background jobs ---
+if [[ "$jobs_count" -gt 0 ]]; then
+  output+=" ⚙${jobs_count}"
+fi
+
+# --- Docker running containers ---
+if command -v docker &>/dev/null; then
+  # Only check if docker socket is accessible (avoids slow timeout)
+  if [[ -S /var/run/docker.sock || -S "$HOME/.docker/run/docker.sock" || -S /run/user/$(id -u)/docker.sock ]]; then
+    container_count=$(docker ps -q 2>/dev/null | wc -l)
+    if [[ "$container_count" -gt 0 ]]; then
+      output+=" 🐳${container_count}"
+    fi
+  fi
+fi
+
+echo -n "$output"
