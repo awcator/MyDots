@@ -1,0 +1,58 @@
+#!/usr/bin/env bash
+# prompt-versions: Detect project type and print language versions for PS1.
+# Only prints versions when relevant marker files are found in CWD or parents.
+# Usage: $(prompt-versions) in PS1
+
+set -o pipefail
+
+versions=""
+
+# --- Node ---
+if [[ -f "package.json" || -f ".nvmrc" || -f ".node-version" ]]; then
+  if command -v node &>/dev/null; then
+    versions+=" ⬡$(node --version 2>/dev/null)"
+  fi
+fi
+
+# --- Python ---
+if [[ -n "$VIRTUAL_ENV" || -f "requirements.txt" || -f "pyproject.toml" || -f "setup.py" || -f "Pipfile" || -f "setup.cfg" || -f "tox.ini" ]]; then
+  if command -v python3 &>/dev/null; then
+    versions+=" 🐍$(python3 --version 2>/dev/null | cut -d' ' -f2)"
+  elif command -v python &>/dev/null; then
+    versions+=" 🐍$(python --version 2>/dev/null | cut -d' ' -f2)"
+  fi
+fi
+
+# --- Java ---
+if [[ -f "pom.xml" || -f "build.gradle" || -f "build.gradle.kts" || -f ".java-version" ]]; then
+  if command -v java &>/dev/null; then
+    java_v=$(java -version 2>&1 | head -1 | sed 's/.*"\(.*\)".*/\1/')
+    versions+=" ☕${java_v}"
+  fi
+fi
+
+# --- Go ---
+if [[ -f "go.mod" || -f "go.sum" ]]; then
+  if command -v go &>/dev/null; then
+    go_v=$(go version 2>/dev/null | sed 's/go version go\([^ ]*\).*/\1/')
+    versions+=" 🐹${go_v}"
+  fi
+fi
+
+# --- Rust ---
+if [[ -f "Cargo.toml" ]]; then
+  if command -v rustc &>/dev/null; then
+    rust_v=$(rustc --version 2>/dev/null | cut -d' ' -f2)
+    versions+=" 🦀${rust_v}"
+  fi
+fi
+
+# --- Ruby ---
+if [[ -f "Gemfile" || -f ".ruby-version" ]]; then
+  if command -v ruby &>/dev/null; then
+    ruby_v=$(ruby --version 2>/dev/null | cut -d' ' -f2)
+    versions+=" 💎${ruby_v}"
+  fi
+fi
+
+echo -n "$versions"

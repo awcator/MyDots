@@ -4,6 +4,10 @@ set history-size 10000
 set match-hidden-files on
 set print-completions-horizontally on
 set show-all-if-ambiguous on
+set colored-stats on
+set mark-directories on
+set completion-map-case on
 set show-mode-in-prompt on
 set vi-ins-mode-string \1\e[5 q\2
 set vi-cmd-mode-string \1\e[1 q\2
+# test-marker-delete-me

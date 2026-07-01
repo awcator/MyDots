@@ -33,6 +33,7 @@ set $base      #1e1e2e
 set $mantle    #181825
 set $crust     #11111b
 
+focus_on_window_activation none #disable blinking for teams
 no_focus [class="teams-for-linux"]
 for_window [class="teams-for-linux" urgent="latest"] focus
 for_window [instance=windsurf] sticky enable

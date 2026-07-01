@@ -1,88 +1,503 @@
 #!/usr/bin/env bash
-# install.sh — Deploy dotfiles from this repo to $HOME
-# Usage: git clone <repo> && cd MyDots && ./install.sh
+# install.sh — Sync & deploy dotfiles from this repo to $HOME
+#
+# Usage:
+#   ./install.sh              # Sync system→repo, then symlink repo→home
+#   ./install.sh --sync-only  # Only copy newer system files into repo
+#   ./install.sh --link-only  # Only create symlinks (skip sync)
+#   ./install.sh --dry-run    # Show what would happen, change nothing
+#   ./install.sh --verify     # Run Docker-based verification after install
 
-set -e
+set -euo pipefail
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Configuration
+# ─────────────────────────────────────────────────────────────────────────────
 
 DOTDIR="$(cd "$(dirname "$0")" && pwd)"
-BACKUP="$HOME/.dotfiles_backup_$(date +%Y%m%d_%H%M%S)"
+BACKUP_DIR="$HOME/.dotfiles_backup_$(date +%Y%m%d_%H%M%S)"
 
-echo "==> Installing dotfiles from: $DOTDIR"
-echo "==> Backup of existing files: $BACKUP"
-mkdir -p "$BACKUP"
+# Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+CYAN='\033[0;36m'
+BOLD='\033[1m'
+RESET='\033[0m'
 
-# --- Symlink helper ---
+# Flags
+DO_SYNC=true
+DO_LINK=true
+DO_VERIFY=false
+DRY_RUN=false
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Manifest: all managed dotfile paths (relative to $HOME and $DOTDIR)
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Home-directory dotfiles
+HOME_DOTS=(
+    .bashrc
+    .bash_profile
+    .bash_aliases
+    .bash_logout
+    .inputrc
+    .vimrc
+    .gitconfig
+    .tmux.conf
+    .xinitrc
+    .Xresources
+    .Xdefaults
+    .i3status.conf
+    .zshrc
+)
+
+# .config directories to manage (entire directory trees)
+CONFIG_DIRS=(
+    alacritty
+    btop
+    cmus
+    compton
+    dunst
+    i3
+    kitty
+    mpv
+    neofetch
+    nvim
+    parcellite
+    picom
+    rofi
+    sunshine
+)
+
+# .claude files to manage
+CLAUDE_FILES=(
+    settings.json
+    settings.local.json
+    CLAUDE.md
+    statusline.sh
+    claude-mirror.sh
+)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Parse arguments
+# ─────────────────────────────────────────────────────────────────────────────
+
+for arg in "$@"; do
+    case "$arg" in
+        --sync-only) DO_SYNC=true; DO_LINK=false ;;
+        --link-only) DO_SYNC=false; DO_LINK=true ;;
+        --verify)    DO_VERIFY=true ;;
+        --dry-run)   DRY_RUN=true ;;
+        --help|-h)
+            echo "Usage: $0 [OPTIONS]"
+            echo ""
+            echo "Options:"
+            echo "  --sync-only   Only sync system files → repo (no linking)"
+            echo "  --link-only   Only create symlinks (skip sync)"
+            echo "  --verify      Run Docker archlinux verification after install"
+            echo "  --dry-run     Show what would be done without changing anything"
+            echo ""
+            echo "Default: sync + link"
+            exit 0
+            ;;
+        *) echo "Unknown option: $arg"; exit 1 ;;
+    esac
+done
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Helpers
+# ─────────────────────────────────────────────────────────────────────────────
+
+log_info()    { echo -e "${BLUE}[INFO]${RESET} $*"; }
+log_sync()    { echo -e "${CYAN}[SYNC]${RESET} $*"; }
+log_link()    { echo -e "${GREEN}[LINK]${RESET} $*"; }
+log_skip()    { echo -e "${YELLOW}[SKIP]${RESET} $*"; }
+log_new()     { echo -e "${GREEN}[NEW]${RESET}  $*"; }
+log_diff()    { echo -e "${RED}[DIFF]${RESET} $*"; }
+log_dry()     { echo -e "${YELLOW}[DRY-RUN]${RESET} $*"; }
+log_header()  { echo -e "\n${BOLD}═══ $* ═══${RESET}\n"; }
+
+# Sync a single file: system → repo (if system version is newer/different)
+sync_file() {
+    local rel="$1"  # relative path (e.g., .bashrc or .config/kitty/kitty.conf)
+    local sys_file="$HOME/$rel"
+    local repo_file="$DOTDIR/$rel"
+
+    # Skip if system file doesn't exist
+    if [[ ! -f "$sys_file" ]]; then
+        return
+    fi
+
+    # Skip if it's already a symlink pointing to our repo
+    if [[ -L "$sys_file" ]]; then
+        local target
+        target="$(readlink -f "$sys_file")"
+        if [[ "$target" == "$DOTDIR/"* ]]; then
+            return
+        fi
+    fi
+
+    # If repo file doesn't exist → new file to add
+    if [[ ! -f "$repo_file" ]]; then
+        log_new "~/$rel (new file, not yet in repo)"
+        if [[ "$DRY_RUN" == true ]]; then
+            log_dry "Would copy: ~/$rel → repo"
+        else
+            mkdir -p "$(dirname "$repo_file")"
+            cp "$sys_file" "$repo_file"
+            log_sync "Copied ~/$rel → repo"
+        fi
+        return
+    fi
+
+    # Both exist — compare
+    if ! diff -q "$sys_file" "$repo_file" &>/dev/null; then
+        log_diff "~/$rel differs from repo version"
+        # Show brief diff
+        diff --color=always -u "$repo_file" "$sys_file" 2>/dev/null | head -30 || true
+        echo ""
+        if [[ "$DRY_RUN" == true ]]; then
+            log_dry "Would copy: ~/$rel → repo (system version is newer)"
+        else
+            cp "$sys_file" "$repo_file"
+            log_sync "Updated repo: $rel (copied system version)"
+        fi
+    fi
+}
+
+# Create a symlink: repo → system
 link_file() {
-    local src="$1"  # relative to repo
-    local dest="$HOME/$src"
-    local dest_dir="$(dirname "$dest")"
+    local rel="$1"  # relative path
+    local src="$DOTDIR/$rel"
+    local dest="$HOME/$rel"
+    local dest_dir
+    dest_dir="$(dirname "$dest")"
+
+    # Source must exist in repo
+    if [[ ! -e "$src" ]]; then
+        return
+    fi
+
+    if [[ "$DRY_RUN" == true ]]; then
+        if [[ -L "$dest" ]]; then
+            local current_target
+            current_target="$(readlink -f "$dest")"
+            if [[ "$current_target" == "$src" || "$current_target" == "$(readlink -f "$src")" ]]; then
+                return  # Already correctly linked
+            fi
+        fi
+        log_dry "Would link: ~/$rel → $src"
+        return
+    fi
 
     mkdir -p "$dest_dir"
 
-    # Backup existing file/dir (not symlinks pointing to us)
-    if [[ -e "$dest" && ! -L "$dest" ]]; then
-        mkdir -p "$BACKUP/$(dirname "$src")"
-        mv "$dest" "$BACKUP/$src"
-        echo "  backed up: ~/$src"
-    elif [[ -L "$dest" ]]; then
+    # Already a symlink pointing to the right place
+    if [[ -L "$dest" ]]; then
+        local current_target
+        current_target="$(readlink -f "$dest")"
+        if [[ "$current_target" == "$src" || "$current_target" == "$(readlink -f "$src")" ]]; then
+            return  # Already correct
+        fi
         rm "$dest"
+    elif [[ -e "$dest" ]]; then
+        # Backup existing regular file (handle immutable files)
+        mkdir -p "$BACKUP_DIR/$(dirname "$rel")"
+        if ! mv "$dest" "$BACKUP_DIR/$rel" 2>/dev/null; then
+            # Try removing immutable attribute (needs sudo)
+            if sudo chattr -i "$dest" 2>/dev/null; then
+                mv "$dest" "$BACKUP_DIR/$rel"
+                log_info "Backed up (removed immutable): ~/$rel → $BACKUP_DIR/$rel"
+            else
+                log_skip "~/$rel (cannot move — immutable or permission denied, skipping)"
+                return
+            fi
+        else
+            log_info "Backed up: ~/$rel → $BACKUP_DIR/$rel"
+        fi
     fi
 
-    ln -sf "$DOTDIR/$src" "$dest"
-    echo "  linked: ~/$src -> $DOTDIR/$src"
+    ln -sf "$src" "$dest"
+    log_link "~/$rel → $src"
 }
 
-# --- Home dotfiles ---
+# ─────────────────────────────────────────────────────────────────────────────
+# Phase 1: SYNC (system → repo)
+# ─────────────────────────────────────────────────────────────────────────────
+
+do_sync() {
+    log_header "Phase 1: Syncing system dotfiles → repo"
+    local synced=0
+
+    # Home dotfiles
+    log_info "Checking home dotfiles..."
+    for f in "${HOME_DOTS[@]}"; do
+        sync_file "$f"
+    done
+
+    # .vim directory
+    if [[ -d "$HOME/.vim" ]]; then
+        find "$HOME/.vim" -type f 2>/dev/null | while read -r sys_file; do
+            local rel="${sys_file#$HOME/}"
+            sync_file "$rel"
+        done
+    fi
+
+    # bin/ scripts
+    log_info "Checking ~/bin scripts..."
+    if [[ -d "$HOME/bin" ]]; then
+        for f in "$HOME"/bin/*; do
+            [[ -f "$f" ]] || continue
+            local name
+            name="$(basename "$f")"
+            sync_file "bin/$name"
+        done
+    fi
+
+    # .config/ directories
+    log_info "Checking .config/ directories..."
+    for dir in "${CONFIG_DIRS[@]}"; do
+        if [[ -d "$HOME/.config/$dir" ]]; then
+            find "$HOME/.config/$dir" -type f 2>/dev/null | while read -r sys_file; do
+                local rel="${sys_file#$HOME/}"
+                # Skip cache/log/credential files
+                case "$rel" in
+                    *.log|*credentials*|*cache*|*_state.json) continue ;;
+                esac
+                sync_file "$rel"
+            done
+        fi
+    done
+
+    # .claude files
+    log_info "Checking .claude/ configs..."
+    for f in "${CLAUDE_FILES[@]}"; do
+        sync_file ".claude/$f"
+    done
+
+    echo ""
+    if [[ "$DRY_RUN" == true ]]; then
+        log_info "Dry run complete — no files were modified."
+    else
+        log_info "Sync complete. Review changes with: cd $DOTDIR && git diff"
+    fi
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Phase 2: SYMLINK (repo → system)
+# ─────────────────────────────────────────────────────────────────────────────
+
+do_link() {
+    log_header "Phase 2: Creating symlinks (repo → home)"
+
+    if [[ "$DRY_RUN" != true ]]; then
+        mkdir -p "$BACKUP_DIR"
+    fi
+
+    # Home dotfiles
+    log_info "Linking home dotfiles..."
+    for f in "${HOME_DOTS[@]}"; do
+        [[ -f "$DOTDIR/$f" ]] && link_file "$f"
+    done
+
+    # .vim directory
+    if [[ -d "$DOTDIR/.vim" ]]; then
+        find "$DOTDIR/.vim" -type f 2>/dev/null | while read -r f; do
+            local rel="${f#$DOTDIR/}"
+            link_file "$rel"
+        done
+    fi
+
+    # bin/ scripts
+    log_info "Linking ~/bin scripts..."
+    mkdir -p "$HOME/bin"
+    for f in "$DOTDIR"/bin/*; do
+        [[ -f "$f" ]] || continue
+        local name
+        name="$(basename "$f")"
+        link_file "bin/$name"
+    done
+    if [[ "$DRY_RUN" != true ]]; then
+        chmod +x "$HOME"/bin/* 2>/dev/null || true
+    fi
+
+    # .config/ directories
+    log_info "Linking .config/ directories..."
+    for dir in "${CONFIG_DIRS[@]}"; do
+        if [[ -d "$DOTDIR/.config/$dir" ]]; then
+            find "$DOTDIR/.config/$dir" -type f 2>/dev/null | while read -r f; do
+                local rel="${f#$DOTDIR/}"
+                link_file "$rel"
+            done
+        fi
+    done
+
+    # .claude files
+    log_info "Linking .claude/ configs..."
+    for f in "${CLAUDE_FILES[@]}"; do
+        [[ -f "$DOTDIR/.claude/$f" ]] && link_file ".claude/$f"
+    done
+    if [[ "$DRY_RUN" != true ]]; then
+        chmod +x "$HOME/.claude/statusline.sh" "$HOME/.claude/claude-mirror.sh" 2>/dev/null || true
+    fi
+
+    # Cleanup empty backup dir
+    if [[ "$DRY_RUN" != true ]]; then
+        rmdir "$BACKUP_DIR" 2>/dev/null && true || log_info "Backups saved to: $BACKUP_DIR"
+    fi
+
+    echo ""
+    log_info "Symlink phase complete."
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Phase 3: DOCKER VERIFICATION
+# ─────────────────────────────────────────────────────────────────────────────
+
+do_verify() {
+    log_header "Phase 3: Docker Verification (archlinux)"
+
+    if ! command -v docker &>/dev/null; then
+        echo -e "${RED}ERROR:${RESET} Docker not found. Install docker to use --verify."
+        exit 1
+    fi
+
+    log_info "Ensuring archlinux:latest is available..."
+    if ! docker image inspect archlinux:latest &>/dev/null; then
+        docker pull archlinux:latest
+    else
+        log_info "archlinux:latest already available locally."
+    fi
+
+    log_info "Launching verification container..."
+
+    # Create a verification script to run inside the container
+    local verify_script
+    verify_script=$(cat <<'INNEREOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+RESET='\033[0m'
+
+DOTDIR="/dotfiles"
+export HOME="/home/testuser"
+mkdir -p "$HOME"
+
+echo "=== Running install.sh --link-only inside archlinux container ==="
 echo ""
-echo "==> Linking dotfiles..."
+
+cd "$DOTDIR"
+bash ./install.sh --link-only
+
+echo ""
+echo "=== Verifying all symlinks resolve correctly ==="
+echo ""
+
+ERRORS=0
+TOTAL=0
+
+check_link() {
+    local path="$1"
+    TOTAL=$((TOTAL + 1))
+    if [[ -L "$path" ]]; then
+        local target
+        target="$(readlink "$path")"
+        if [[ -e "$path" ]]; then
+            echo -e "${GREEN}[OK]${RESET} $path → $target"
+        else
+            echo -e "${RED}[BROKEN]${RESET} $path → $target (target missing)"
+            ERRORS=$((ERRORS + 1))
+        fi
+    elif [[ -e "$path" ]]; then
+        echo -e "${YELLOW}[NOT LINKED]${RESET} $path (regular file, not a symlink)"
+        ERRORS=$((ERRORS + 1))
+    fi
+}
+
+# Check home dotfiles
 for f in .bashrc .bash_profile .bash_aliases .bash_logout .inputrc .vimrc \
-         .gitconfig .tmux.conf .xinitrc .Xresources .Xdefaults .i3status.conf; do
-    [[ -f "$DOTDIR/$f" ]] && link_file "$f"
+         .gitconfig .tmux.conf .xinitrc .Xresources .Xdefaults .i3status.conf .zshrc; do
+    [[ -f "$DOTDIR/$f" ]] && check_link "$HOME/$f"
 done
 
-# --- bin/ ---
-echo ""
-echo "==> Linking ~/bin scripts..."
-mkdir -p "$HOME/bin"
+# Check bin/
 for f in "$DOTDIR"/bin/*; do
     [[ -f "$f" ]] || continue
     name="$(basename "$f")"
-    link_file "bin/$name"
+    check_link "$HOME/bin/$name"
 done
-chmod +x "$HOME"/bin/* 2>/dev/null
 
-# --- .config/ ---
-echo ""
-echo "==> Linking .config/ dirs..."
+# Check .config/
 find "$DOTDIR/.config" -type f 2>/dev/null | while read -r f; do
     rel="${f#$DOTDIR/}"
-    link_file "$rel"
+    check_link "$HOME/$rel"
 done
 
-# --- .claude/ settings ---
-echo ""
-echo "==> Linking .claude/ configs..."
+# Check .claude/
 for f in settings.json settings.local.json CLAUDE.md statusline.sh claude-mirror.sh; do
-    [[ -f "$DOTDIR/.claude/$f" ]] && link_file ".claude/$f"
+    [[ -f "$DOTDIR/.claude/$f" ]] && check_link "$HOME/.claude/$f"
 done
-chmod +x "$HOME/.claude/statusline.sh" "$HOME/.claude/claude-mirror.sh" 2>/dev/null
 
-# --- etc/ (requires sudo) ---
-if [[ -d "$DOTDIR/etc" ]]; then
+echo ""
+echo "════════════════════════════════════════════"
+echo -e " Total checked: ${TOTAL}"
+echo -e " Errors: ${ERRORS}"
+echo "════════════════════════════════════════════"
+
+if [[ "$ERRORS" -eq 0 ]]; then
+    echo -e "${GREEN}${RESET} All symlinks verified successfully!"
+    exit 0
+else
+    echo -e "${RED}${RESET} $ERRORS symlink(s) failed verification."
+    exit 1
+fi
+INNEREOF
+)
+
+    docker run --rm --network none \
+        -v "$DOTDIR:/dotfiles:ro" \
+        archlinux:latest \
+        bash -c "$verify_script"
+
+    local exit_code=$?
     echo ""
-    echo "==> System configs in etc/ (requires sudo)..."
-    read -rp "   Install system configs to /etc? [y/N] " ans
-    if [[ "$ans" =~ ^[Yy] ]]; then
-        find "$DOTDIR/etc" -type f | while read -r f; do
-            dest="/etc/${f#$DOTDIR/etc/}"
-            sudo mkdir -p "$(dirname "$dest")"
-            sudo cp "$f" "$dest"
-            echo "  copied: $dest"
-        done
+    if [[ $exit_code -eq 0 ]]; then
+        log_info "Docker verification PASSED!"
     else
-        echo "  skipped."
+        echo -e "${RED}Docker verification FAILED!${RESET}"
+        exit 1
     fi
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Main
+# ─────────────────────────────────────────────────────────────────────────────
+
+echo -e "${BOLD}╔══════════════════════════════════════════════╗${RESET}"
+echo -e "${BOLD}║     Dotfiles Manager — Sync & Symlink        ║${RESET}"
+echo -e "${BOLD}╚══════════════════════════════════════════════╝${RESET}"
+echo ""
+echo -e "  Repo:  ${CYAN}$DOTDIR${RESET}"
+echo -e "  Home:  ${CYAN}$HOME${RESET}"
+echo -e "  Flags: sync=${DO_SYNC} link=${DO_LINK} verify=${DO_VERIFY} dry-run=${DRY_RUN}"
+echo ""
+
+if [[ "$DO_SYNC" == true ]]; then
+    do_sync
+fi
+
+if [[ "$DO_LINK" == true ]]; then
+    do_link
+fi
+
+if [[ "$DO_VERIFY" == true ]]; then
+    do_verify
 fi
 
 echo ""
-echo "==> Done! Open a new terminal or run: source ~/.bashrc"
+echo -e "${GREEN}${BOLD}Done!${RESET} Open a new terminal or run: ${CYAN}source ~/.bashrc${RESET}"
