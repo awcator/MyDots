@@ -59,7 +59,7 @@ E = (
     r'exited\s+with|exit\s+code|non-zero|nonzero|'
     # network / dns
     r'NXDOMAIN|SERVFAIL|REFUSED|FORMERR|connreset|connrefused|'
-    r'connection\s+reset|connection\s+refused|connection\s+closed|'
+    r'connection\s+reset|connection\s+refused|connection\s+closed|close'
     r'broken\s+pipe|reset\s+by\s+peer|host\s+unreachable|'
     r'network\s+unreachable|no\s+route|dns\s+fail|'
     r'ssl\s+error|tls\s+error|handshake\s+fail|cert\s+expired|'
@@ -137,7 +137,7 @@ S = (
 # ── mark3: YELLOW — status, info, in-progress ────────────────────────────
 T = (
     # in-progress states
-    r'(loading|pending|waiting|processing|busy|'
+    r'(loading|pending|waiting|processing|busy|open'
     r'queued|enqueued|scheduled|dispatched|dequeued|'
     r'executing|computing|calculating|rendering|'
     r'compiling|building|assembling|linking|packaging|bundling|'
