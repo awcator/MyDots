@@ -25,11 +25,11 @@ E = (
     r'crash|segfault|segv|sigsegv|sigabrt|sigkill|sigterm|'
     r'coredump|core\s+dump|abort|exception|throwable|'
     r'traceback|stacktrace|stack\s+trace|backtrace|'
-    r'assertion|violation|'
+    r'assertion|violation|doesnt|doesn|cant|'
     # denied / refused / auth failures
     r'denied|refused|forbidden|unauthorized|unauthenticated|'
     r'rejected|revoked|banned|blacklisted|blocklisted|restricted|'
-    r'locked\s+out|access\s+denied|permission\s+denied|'
+    r'locked\s+out|access\s+denied|permission\s+denied|lock|'
     # unavailable / unreachable
     r'unavailable|unreachable|unresponsive|disconnected|offline|'
     r'down|dead|gone|lost|missing|absent|not\s+found|no\s+such|end|'
@@ -37,7 +37,7 @@ E = (
     r'broken|corrupt|malformed|invalid|illegal|bad|wrong|incorrect|'
     r'inconsistent|mismatch|incompatible|unsupported|unrecognized|'
     r'unexpected|unknown|undefined|uninitialized|null|nil|nan|void|'
-    r'nullptr|nullpointer|nullref|npe|'
+    r'nullptr|nullpointer|nullref|npe|empty|blank|'
     # explicit negative outcomes
     r'failed|failure|unsuccessful|unresolved|unhandled|uncaught|'
     r'unprocessed|undelivered|unfinished|incomplete|'
@@ -56,7 +56,7 @@ E = (
     # stopped / killed
     r'killed|terminated|aborted|cancelled|canceled|stopped|halted|'
     r'shutdown|crashed|dumped|trapped|interrupted|'
-    r'exited\s+with|exit\s+code|non-zero|nonzero|'
+    r'exited\s+with|exit\s+code|non-zero|nonzero|zero|'
     # network / dns
     r'NXDOMAIN|SERVFAIL|REFUSED|FORMERR|connreset|connrefused|'
     r'connection\s+reset|connection\s+refused|connection\s+closed|close'
@@ -193,7 +193,7 @@ T = (
     r'hashing|signing|verifying|'
     r'resolving|looking\s+up|querying|requesting|'
     r'binding|unbinding|subscribing|unsubscribing|'
-    r'caching|invalidating|warming|prefetching)'
+    r'caching|invalidating|warming|prefetching|key)'
 )
 
 SPEC = ['iregex', '1', E, '2', S, '3', T]
