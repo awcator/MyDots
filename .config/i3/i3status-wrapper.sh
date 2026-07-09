@@ -1,21 +1,34 @@
 #!/usr/bin/env python3
 """
-Wrapper around i3status that prepends laptop (eDP-1) workspace indicators
-to the i3bar JSON output on the external monitor bar.
-Shows which workspaces on the laptop have windows open.
+Wrapper around i3status that:
+1. Prepends laptop (eDP-1) workspace indicators on external monitor bar
+2. Colorizes each i3status block with Catppuccin Mocha accents
 """
 
 import sys
 import json
 import subprocess
 
-# Catppuccin Mocha colors (matching i3bar workspace colors)
-COLORS = {
-    "focused":  {"background": "#b4befe", "color": "#11111b", "border": "#b4befe"},  # lavender
-    "visible":  {"background": "#313244", "color": "#cdd6f4", "border": "#6c7086"},  # surface0
-    "urgent":   {"background": "#fab387", "color": "#11111b", "border": "#fab387"},  # peach
-    "inactive": {"background": "#1e1e2e", "color": "#7f849c", "border": "#1e1e2e"},  # base
+# Catppuccin Mocha workspace colors
+WS_COLORS = {
+    "focused":  {"background": "#b4befe", "color": "#11111b", "border": "#b4befe"},
+    "visible":  {"background": "#313244", "color": "#cdd6f4", "border": "#6c7086"},
+    "urgent":   {"background": "#fab387", "color": "#11111b", "border": "#fab387"},
+    "inactive": {"background": "#1e1e2e", "color": "#7f849c", "border": "#1e1e2e"},
 }
+
+# Per-module colors (Catppuccin Mocha palette)
+BLOCK_COLORS = {
+    "wireless":        "#89dceb",  # sky
+    "ethernet":        "#89b4fa",  # blue
+    "battery":         "#a6e3a1",  # green
+    "cpu_usage":       "#cba6f7",  # mauve
+    "cpu_temperature": "#fab387",  # peach
+    "disk_info":       "#74c7ec",  # sapphire
+    "memory":          "#f5c2e7",  # pink
+    "tztime":          "#f5e0dc",  # rosewater
+}
+
 
 def get_laptop_workspace_blocks():
     """Get workspace blocks for eDP-1 output with colored backgrounds."""
@@ -33,13 +46,13 @@ def get_laptop_workspace_blocks():
         for w in laptop_ws:
             name = w['name']
             if w.get('urgent'):
-                style = COLORS["urgent"]
+                style = WS_COLORS["urgent"]
             elif w.get('focused'):
-                style = COLORS["focused"]
+                style = WS_COLORS["focused"]
             elif w.get('visible'):
-                style = COLORS["visible"]
+                style = WS_COLORS["visible"]
             else:
-                style = COLORS["inactive"]
+                style = WS_COLORS["inactive"]
 
             blocks.append({
                 "full_text": f" {name} ",
@@ -54,6 +67,19 @@ def get_laptop_workspace_blocks():
         return blocks
     except Exception:
         return []
+
+
+def colorize_blocks(blocks):
+    """Apply Catppuccin accent colors to each i3status block by module name."""
+    for block in blocks:
+        name = block.get("name", "")
+        if name in BLOCK_COLORS:
+            block["color"] = BLOCK_COLORS[name]
+        # Hide empty blocks (e.g. ethernet when down)
+        if not block.get("full_text", "").strip():
+            block["full_text"] = ""
+    # Filter out empty blocks
+    return [b for b in blocks if b.get("full_text", "").strip()]
 
 
 def main():
@@ -71,7 +97,6 @@ def main():
     opening = proc.stdout.readline().strip()
     print(opening, flush=True)
 
-    first = True
     for line in proc.stdout:
         line = line.strip()
         if not line:
@@ -89,17 +114,19 @@ def main():
             print(prefix + line, flush=True)
             continue
 
+        # Colorize i3status blocks
+        blocks = colorize_blocks(blocks)
+
         # Prepend laptop workspace blocks
         laptop_blocks = get_laptop_workspace_blocks()
         if laptop_blocks:
-            # Add a label block first
             label = {
-                "full_text": "💻",
+                "full_text": " 💻 ",
                 "color": "#89dceb",
                 "separator": False,
                 "separator_block_width": 3,
             }
-            blocks = [label] + laptop_blocks + blocks
+            blocks = [label] + laptop_blocks + [{"full_text": " ", "separator": False, "separator_block_width": 9}] + blocks
 
         print(prefix + json.dumps(blocks), flush=True)
 
