@@ -33,7 +33,7 @@ set $base      #1e1e2e
 set $mantle    #181825
 set $crust     #11111b
 
-focus_on_window_activation none #disable blinking for teams
+focus_on_window_activation urgent
 no_focus [class="teams-for-linux"]
 for_window [class="teams-for-linux" urgent="latest"] focus
 for_window [instance=windsurf] sticky enable
@@ -126,6 +126,22 @@ bindsym $mod+7 workspace $ws7
 bindsym $mod+8 workspace $ws8
 bindsym $mod+9 workspace $ws9
 bindsym $mod+0 workspace $ws10
+
+# Backup keybindings (Ctrl+Shift+Alt) for when games grab the Super key
+bindsym Control+Shift+Mod1+Left focus left
+bindsym Control+Shift+Mod1+Right focus right
+bindsym Control+Shift+Mod1+Up focus up
+bindsym Control+Shift+Mod1+Down focus down
+bindsym Control+Shift+Mod1+1 workspace $ws1
+bindsym Control+Shift+Mod1+2 workspace $ws2
+bindsym Control+Shift+Mod1+3 workspace $ws3
+bindsym Control+Shift+Mod1+4 workspace $ws4
+bindsym Control+Shift+Mod1+5 workspace $ws5
+bindsym Control+Shift+Mod1+6 workspace $ws6
+bindsym Control+Shift+Mod1+7 workspace $ws7
+bindsym Control+Shift+Mod1+8 workspace $ws8
+bindsym Control+Shift+Mod1+9 workspace $ws9
+bindsym Control+Shift+Mod1+0 workspace $ws10
 
 # move focused container to workspace
 bindsym $mod+Shift+1 move container to workspace $ws1
@@ -228,6 +244,7 @@ bar {
 
 	output eDP-1
 	tray_output eDP-1
+	workspace_buttons yes
 
     colors {
         background         $base
@@ -244,6 +261,8 @@ bar {
 
 # Toggle laptop bar based on external monitor presence
 exec_always --no-startup-id ~/.config/i3/bar-toggle.sh
+# Set dunst notifications to external monitor if connected
+exec_always --no-startup-id ~/.config/i3/dunst-monitor.sh
 #exec_always --no-startup-id ~/.config/polybar/launch.sh
 
 
