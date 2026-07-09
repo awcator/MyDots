@@ -9,8 +9,16 @@ import sys
 import json
 import subprocess
 
-def get_laptop_workspaces():
-    """Get workspace info for eDP-1 output."""
+# Catppuccin Mocha colors (matching i3bar workspace colors)
+COLORS = {
+    "focused":  {"background": "#b4befe", "color": "#11111b", "border": "#b4befe"},  # lavender
+    "visible":  {"background": "#313244", "color": "#cdd6f4", "border": "#6c7086"},  # surface0
+    "urgent":   {"background": "#fab387", "color": "#11111b", "border": "#fab387"},  # peach
+    "inactive": {"background": "#1e1e2e", "color": "#7f849c", "border": "#1e1e2e"},  # base
+}
+
+def get_laptop_workspace_blocks():
+    """Get workspace blocks for eDP-1 output with colored backgrounds."""
     try:
         result = subprocess.run(
             ['i3-msg', '-t', 'get_workspaces'],
@@ -19,22 +27,33 @@ def get_laptop_workspaces():
         workspaces = json.loads(result.stdout)
         laptop_ws = [w for w in workspaces if w.get('output') == 'eDP-1']
         if not laptop_ws:
-            return None
+            return []
 
-        parts = []
+        blocks = []
         for w in laptop_ws:
-            num = w.get('num', '?')
-            name = w['name'].split(': ', 1)[-1] if ': ' in w['name'] else w['name']
+            name = w['name']
             if w.get('urgent'):
-                parts.append(f"!{num}:{name}")
+                style = COLORS["urgent"]
             elif w.get('focused'):
-                parts.append(f"*{num}:{name}")
+                style = COLORS["focused"]
+            elif w.get('visible'):
+                style = COLORS["visible"]
             else:
-                parts.append(f"{num}:{name}")
+                style = COLORS["inactive"]
 
-        return "eDP[" + " ".join(parts) + "]"
+            blocks.append({
+                "full_text": f" {name} ",
+                "color": style["color"],
+                "background": style["background"],
+                "border": style["border"],
+                "separator": False,
+                "separator_block_width": 3,
+                "min_width": 30,
+            })
+
+        return blocks
     except Exception:
-        return None
+        return []
 
 
 def main():
@@ -70,16 +89,17 @@ def main():
             print(prefix + line, flush=True)
             continue
 
-        # Prepend laptop workspace info
-        laptop_info = get_laptop_workspaces()
-        if laptop_info:
-            laptop_block = {
-                "full_text": laptop_info,
+        # Prepend laptop workspace blocks
+        laptop_blocks = get_laptop_workspace_blocks()
+        if laptop_blocks:
+            # Add a label block first
+            label = {
+                "full_text": "💻",
                 "color": "#89dceb",
-                "separator": True,
-                "separator_block_width": 15
+                "separator": False,
+                "separator_block_width": 3,
             }
-            blocks.insert(0, laptop_block)
+            blocks = [label] + laptop_blocks + blocks
 
         print(prefix + json.dumps(blocks), flush=True)
 
