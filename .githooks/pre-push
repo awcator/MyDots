@@ -17,6 +17,12 @@ PATTERNS=(
     'token=[0-9a-f-]\{36\}'         # Token assignments (e.g. duckdns)
 )
 
+# Files where UUIDs are safe (disk identifiers, not secrets)
+UUID_SAFE_FILES="etc/fstab\|etc/default/grub\|mkinitcpio"
+
+# UUID pattern checked separately with exclusions
+UUID_PATTERN='[0-9a-f]\{8\}-[0-9a-f]\{4\}-[0-9a-f]\{4\}-[0-9a-f]\{4\}-[0-9a-f]\{12\}'
+
 FOUND=0
 
 # Read the push info from stdin to determine what's being pushed
@@ -46,6 +52,19 @@ while read local_ref local_sha remote_ref remote_sha; do
             FOUND=1
         fi
     done
+
+    # UUID check — exclude files where UUIDs are disk identifiers (fstab, grub, etc.)
+    uuid_matches=$(git diff "$remote_sha" "$local_sha" 2>/dev/null | grep "^+" | grep -v "^+++" | grep "$UUID_PATTERN" || true)
+    if [[ -n "$uuid_matches" ]]; then
+        # Filter out matches from safe files
+        unsafe_uuids=$(git diff "$remote_sha" "$local_sha" 2>/dev/null | grep -B5 "$UUID_PATTERN" | grep "^+++ b/" | grep -v "$UUID_SAFE_FILES" || true)
+        if [[ -n "$unsafe_uuids" ]]; then
+            echo -e "${RED}[BLOCKED]${NC} UUID token detected in non-safe file(s):"
+            echo "$unsafe_uuids" | sed 's/^+++ b\//  /' | head -5
+            echo ""
+            FOUND=1
+        fi
+    fi
 
     # Check if any sensitive files were added in unpushed commits
     SENSITIVE_FILES=(".env" "credentials.json" "*.pem" "*.key" "id_rsa" "id_ed25519")
