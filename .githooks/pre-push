@@ -20,29 +20,43 @@ PATTERNS=(
 
 FOUND=0
 
-for pattern in "${PATTERNS[@]}"; do
-    matches=$(git diff --cached --diff-filter=d -U0 HEAD 2>/dev/null | grep -i "^+" | grep -v "^+++" | grep "$pattern" || true)
-    if [[ -z "$matches" ]]; then
-        # Also check staged files directly
-        matches=$(git grep -l "$pattern" -- ':!.git' 2>/dev/null || true)
+# Read the push info from stdin to determine what's being pushed
+while read local_ref local_sha remote_ref remote_sha; do
+    # Skip delete pushes
+    if [[ "$local_sha" == "0000000000000000000000000000000000000000" ]]; then
+        continue
     fi
-    if [[ -n "$matches" ]]; then
-        echo -e "${RED}[BLOCKED]${NC} Potential secret detected matching pattern:"
-        echo "  $pattern"
-        echo "$matches" | head -5
-        echo ""
-        FOUND=1
-    fi
-done
 
-# Check specific known sensitive files
-SENSITIVE_FILES=(".env" "credentials.json" "*.pem" "*.key" "id_rsa" "id_ed25519")
-for pat in "${SENSITIVE_FILES[@]}"; do
-    found=$(git ls-files "$pat" 2>/dev/null)
-    if [[ -n "$found" ]]; then
-        echo -e "${RED}[BLOCKED]${NC} Sensitive file tracked: $found"
-        FOUND=1
+    # Determine the range of commits being pushed
+    if [[ "$remote_sha" == "0000000000000000000000000000000000000000" ]]; then
+        # New branch — check all commits not on remote
+        RANGE="$local_sha --not --remotes"
+    else
+        # Existing branch — only check new commits
+        RANGE="$remote_sha..$local_sha"
     fi
+
+    # Scan only the DIFF of unpushed commits (new lines only)
+    for pattern in "${PATTERNS[@]}"; do
+        matches=$(git diff "$remote_sha" "$local_sha" 2>/dev/null | grep "^+" | grep -v "^+++" | grep "$pattern" || true)
+        if [[ -n "$matches" ]]; then
+            echo -e "${RED}[BLOCKED]${NC} Potential secret in unpushed changes matching:"
+            echo "  $pattern"
+            echo "$matches" | sed 's/^+/  /' | head -5
+            echo ""
+            FOUND=1
+        fi
+    done
+
+    # Check if any sensitive files were added in unpushed commits
+    SENSITIVE_FILES=(".env" "credentials.json" "*.pem" "*.key" "id_rsa" "id_ed25519")
+    for pat in "${SENSITIVE_FILES[@]}"; do
+        found=$(git diff --name-only "$remote_sha" "$local_sha" 2>/dev/null | grep -E "(^|/)${pat}$" || true)
+        if [[ -n "$found" ]]; then
+            echo -e "${RED}[BLOCKED]${NC} Sensitive file in unpushed commits: $found"
+            FOUND=1
+        fi
+    done
 done
 
 if [[ $FOUND -eq 1 ]]; then
