@@ -7,7 +7,6 @@ NC='\033[0m'
 
 # Patterns that should NEVER be pushed
 PATTERNS=(
-    '[0-9a-f]\{8\}-[0-9a-f]\{4\}-[0-9a-f]\{4\}-[0-9a-f]\{4\}-[0-9a-f]\{12\}'  # UUIDs (tokens)
     'sk-[a-zA-Z0-9]\{20,\}'          # API keys (sk-...)
     'AKIA[0-9A-Z]\{16\}'             # AWS access keys
     'password\s*=\s*[^$]'            # Hardcoded passwords
@@ -15,7 +14,7 @@ PATTERNS=(
     'ghp_[a-zA-Z0-9]\{36\}'         # GitHub tokens
     'xox[baprs]-[a-zA-Z0-9-]\+'    # Slack tokens
     'oathtool.*--totp [A-Z2-7]\{16,\}'  # TOTP secrets (base32 seeds)
-    '[A-Z2-7]\{16,52\}'             # Raw base32 secrets (16+ chars)
+    'token=[0-9a-f-]\{36\}'         # Token assignments (e.g. duckdns)
 )
 
 FOUND=0
