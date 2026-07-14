@@ -89,6 +89,20 @@ ETC_FILES=(
     "bin/send_virus_alert.sh:/opt/send_virus_alert_sms.sh"
 )
 
+# System config files that must be COPIED (not symlinked) because they are
+# needed before /home is mounted (boot-critical: grub, initramfs, modprobe, udev)
+# Format: "repo_path:system_path"
+ETC_COPY_FILES=(
+    "etc/modprobe.d/nvidia.conf:/etc/modprobe.d/nvidia.conf"
+    "etc/modprobe.d/blacklist-nouveau.conf:/etc/modprobe.d/blacklist-nouveau.conf"
+    "etc/mkinitcpio.conf:/etc/mkinitcpio.conf"
+    "etc/default/grub:/etc/default/grub"
+    "etc/environment:/etc/environment"
+    "etc/udev/rules.d/80-nvidia-pm.rules:/etc/udev/rules.d/80-nvidia-pm.rules"
+    "etc/hostname:/etc/hostname"
+    "etc/fstab:/etc/fstab"
+)
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Parse arguments
 # ─────────────────────────────────────────────────────────────────────────────
@@ -327,6 +341,31 @@ do_sync() {
         fi
     done
 
+    # Boot-critical /etc/ files (sync system → repo)
+    log_info "Checking boot-critical /etc/ configs..."
+    for entry in "${ETC_COPY_FILES[@]}"; do
+        local repo_path="${entry%%:*}"
+        local sys_path="${entry##*:}"
+        local repo_file="$DOTDIR/$repo_path"
+
+        [[ -f "$sys_path" ]] || continue
+        if [[ ! -f "$repo_file" ]]; then
+            log_new "$sys_path (new file, not yet in repo)"
+            if [[ "$DRY_RUN" != true ]]; then
+                mkdir -p "$(dirname "$repo_file")"
+                cp "$sys_path" "$repo_file"
+                log_sync "Copied $sys_path → repo/$repo_path"
+            fi
+        elif ! diff -q "$sys_path" "$repo_file" &>/dev/null; then
+            log_diff "$sys_path differs from repo version"
+            diff --color=always -u "$repo_file" "$sys_path" 2>/dev/null | head -20 || true
+            if [[ "$DRY_RUN" != true ]]; then
+                cp "$sys_path" "$repo_file"
+                log_sync "Updated repo: $repo_path"
+            fi
+        fi
+    done
+
     echo ""
     if [[ "$DRY_RUN" == true ]]; then
         log_info "Dry run complete — no files were modified."
@@ -421,6 +460,28 @@ do_link() {
             fi
             sudo ln -sf "$repo_file" "$sys_path"
             log_link "$sys_path → $repo_file"
+        fi
+    done
+
+    # Boot-critical /etc/ files (COPY, not symlink — needed before /home mounts)
+    log_info "Copying boot-critical /etc/ configs (cannot symlink — needed before /home mounts)..."
+    for entry in "${ETC_COPY_FILES[@]}"; do
+        local repo_path="${entry%%:*}"
+        local sys_path="${entry##*:}"
+        local repo_file="$DOTDIR/$repo_path"
+
+        [[ -f "$repo_file" ]] || continue
+
+        if [[ -f "$sys_path" ]] && diff -q "$sys_path" "$repo_file" &>/dev/null; then
+            continue  # Already matches
+        fi
+
+        if [[ "$DRY_RUN" == true ]]; then
+            log_dry "Would copy (sudo): $repo_file → $sys_path"
+        else
+            sudo mkdir -p "$(dirname "$sys_path")"
+            sudo cp "$repo_file" "$sys_path"
+            log_info "Copied (boot-critical): $repo_path → $sys_path"
         fi
     done
 
