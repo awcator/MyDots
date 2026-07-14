@@ -80,6 +80,15 @@ CLAUDE_FILES=(
     claude-mirror.sh
 )
 
+# System config files (/etc/) — require sudo to symlink
+# Format: "repo_path:system_path"
+ETC_FILES=(
+    "etc/clamav/clamd.conf:/etc/clamav/clamd.conf"
+    "etc/pacman.conf:/etc/pacman.conf"
+    "etc/systemd/system/clamav-clamonacc.service.d/override.conf:/etc/systemd/system/clamav-clamonacc.service.d/override.conf"
+    "bin/send_virus_alert.sh:/opt/send_virus_alert_sms.sh"
+)
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Parse arguments
 # ─────────────────────────────────────────────────────────────────────────────
@@ -277,6 +286,47 @@ do_sync() {
         sync_file ".claude/$f"
     done
 
+    # System /etc/ files
+    log_info "Checking /etc/ configs..."
+    for entry in "${ETC_FILES[@]}"; do
+        local repo_path="${entry%%:*}"
+        local sys_path="${entry##*:}"
+        local repo_file="$DOTDIR/$repo_path"
+
+        if [[ ! -f "$sys_path" ]]; then
+            continue
+        fi
+        # Skip if already a symlink to our repo
+        if [[ -L "$sys_path" ]]; then
+            local target
+            target="$(readlink -f "$sys_path")"
+            if [[ "$target" == "$DOTDIR/"* ]]; then
+                continue
+            fi
+        fi
+        if [[ ! -f "$repo_file" ]]; then
+            log_new "$sys_path (new file, not yet in repo)"
+            if [[ "$DRY_RUN" == true ]]; then
+                log_dry "Would copy: $sys_path → repo/$repo_path"
+            else
+                mkdir -p "$(dirname "$repo_file")"
+                sudo cp "$sys_path" "$repo_file"
+                sudo chown "$(id -u):$(id -g)" "$repo_file"
+                log_sync "Copied $sys_path → repo/$repo_path"
+            fi
+        elif ! diff -q "$sys_path" "$repo_file" &>/dev/null; then
+            log_diff "$sys_path differs from repo version"
+            diff --color=always -u "$repo_file" "$sys_path" 2>/dev/null | head -30 || true
+            if [[ "$DRY_RUN" == true ]]; then
+                log_dry "Would copy: $sys_path → repo/$repo_path"
+            else
+                sudo cp "$sys_path" "$repo_file"
+                sudo chown "$(id -u):$(id -g)" "$repo_file"
+                log_sync "Updated repo: $repo_path"
+            fi
+        fi
+    done
+
     echo ""
     if [[ "$DRY_RUN" == true ]]; then
         log_info "Dry run complete — no files were modified."
@@ -342,6 +392,37 @@ do_link() {
     if [[ "$DRY_RUN" != true ]]; then
         chmod +x "$HOME/.claude/statusline.sh" "$HOME/.claude/claude-mirror.sh" 2>/dev/null || true
     fi
+
+    # System /etc/ files (require sudo)
+    log_info "Linking /etc/ configs (requires sudo)..."
+    for entry in "${ETC_FILES[@]}"; do
+        local repo_path="${entry%%:*}"
+        local sys_path="${entry##*:}"
+        local repo_file="$DOTDIR/$repo_path"
+
+        [[ -f "$repo_file" ]] || continue
+
+        # Already correctly linked?
+        if [[ -L "$sys_path" ]]; then
+            local current_target
+            current_target="$(readlink -f "$sys_path")"
+            if [[ "$current_target" == "$(readlink -f "$repo_file")" ]]; then
+                continue
+            fi
+        fi
+
+        if [[ "$DRY_RUN" == true ]]; then
+            log_dry "Would link (sudo): $sys_path → $repo_file"
+        else
+            # Backup existing file
+            if [[ -f "$sys_path" && ! -L "$sys_path" ]]; then
+                sudo cp "$sys_path" "${sys_path}.bak.$(date +%Y%m%d)"
+                log_info "Backed up: $sys_path → ${sys_path}.bak.$(date +%Y%m%d)"
+            fi
+            sudo ln -sf "$repo_file" "$sys_path"
+            log_link "$sys_path → $repo_file"
+        fi
+    done
 
     # Cleanup empty backup dir
     if [[ "$DRY_RUN" != true ]]; then

@@ -1,3 +1,4 @@
+alias calude="claude"
 alias less="less -R"
 alias feh="feh --recursive --auto-zoom --scale-down"
 alias sandbox="firejail --noprofile --whitelist=/home/awcator/Downloads --whitelist=/home/awcator/.renpy  --whitelist=~/.config/unity3d/ --seccomp --caps.drop=all --net=none"
@@ -76,7 +77,7 @@ alias mybox='ssh -Y -o ServerAliveInterval=60 -i /home/awcator/.ssh/awcator_aws.
 alias ???='gh copilot suggest'
 alias ??='function _aianswer(){ echo -e "\e[31mpollinations: \e[0m"; tgpt --provider pollinations "$1"; echo -e "\e[31mphind: \e[0m"; tgpt --provider phind "$1"; }; _aianswer'
 alias shitgitundoncommits="git reset --hard HEAD~2"
-alias shitgitmasterplz="git fetch origin; git reset --hard origin/master;"
+alias shitgitfixmasterplz="git fetch origin; git reset --hard origin/master;"
 alias shitgitsqushcommits="git reset --soft HEAD~5"
 alias shitgiterasefilehistory="git filter-branch --force --index-filter 'git rm --cached --ignore-unmatch my_sensitiveFile' --prune-empty --tag-name-filter cat 01c859dd7d34017efe4a722734b2eee80ed10c64..HEAD"
 alias shitgitundo="git reset --hard; git clean -xffd"
