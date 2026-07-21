@@ -31,6 +31,7 @@ DO_SYNC=true
 DO_LINK=true
 DO_VERIFY=false
 DRY_RUN=false
+PREFER="local"  # "local" or "repo"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Manifest: all managed dotfile paths (relative to $HOME and $DOTDIR)
@@ -109,20 +110,24 @@ ETC_COPY_FILES=(
 
 for arg in "$@"; do
     case "$arg" in
-        --sync-only) DO_SYNC=true; DO_LINK=false ;;
-        --link-only) DO_SYNC=false; DO_LINK=true ;;
-        --verify)    DO_VERIFY=true ;;
-        --dry-run)   DRY_RUN=true ;;
+        --sync-only)    DO_SYNC=true; DO_LINK=false ;;
+        --link-only)    DO_SYNC=false; DO_LINK=true ;;
+        --verify)       DO_VERIFY=true ;;
+        --dry-run)      DRY_RUN=true ;;
+        --prefer-local) PREFER="local" ;;
+        --prefer-repo)  PREFER="repo" ;;
         --help|-h)
             echo "Usage: $0 [OPTIONS]"
             echo ""
             echo "Options:"
-            echo "  --sync-only   Only sync system files → repo (no linking)"
-            echo "  --link-only   Only create symlinks (skip sync)"
-            echo "  --verify      Run Docker archlinux verification after install"
-            echo "  --dry-run     Show what would be done without changing anything"
+            echo "  --sync-only     Only sync system files → repo (no linking)"
+            echo "  --link-only     Only create symlinks (skip sync)"
+            echo "  --prefer-local  Keep local files when conflicts exist (default)"
+            echo "  --prefer-repo   Force repo versions, removing existing files"
+            echo "  --verify        Run Docker archlinux verification after install"
+            echo "  --dry-run       Show what would be done without changing anything"
             echo ""
-            echo "Default: sync + link"
+            echo "Default: sync + link, prefer local"
             exit 0
             ;;
         *) echo "Unknown option: $arg"; exit 1 ;;
@@ -215,7 +220,10 @@ link_file() {
         return
     fi
 
-    mkdir -p "$dest_dir"
+    if ! mkdir -p "$dest_dir" 2>/dev/null; then
+        log_skip "~/$rel (cannot create parent dir: $dest_dir)"
+        return
+    fi
 
     # Already a symlink pointing to the right place
     if [[ -L "$dest" ]]; then
@@ -226,23 +234,35 @@ link_file() {
         fi
         rm "$dest"
     elif [[ -e "$dest" ]]; then
-        # Backup existing regular file (handle immutable files)
-        mkdir -p "$BACKUP_DIR/$(dirname "$rel")"
-        if ! mv "$dest" "$BACKUP_DIR/$rel" 2>/dev/null; then
-            # Try removing immutable attribute (needs sudo)
-            if sudo chattr -i "$dest" 2>/dev/null; then
-                mv "$dest" "$BACKUP_DIR/$rel"
-                log_info "Backed up (removed immutable): ~/$rel → $BACKUP_DIR/$rel"
-            else
-                log_skip "~/$rel (cannot move — immutable or permission denied, skipping)"
+        if [[ "$PREFER" == "repo" ]]; then
+            # Force remove existing file/dir to replace with symlink
+            rm -rf "$dest" 2>/dev/null || sudo rm -rf "$dest" 2>/dev/null || {
+                log_skip "~/$rel (cannot remove even with sudo, skipping)"
                 return
-            fi
+            }
+            log_info "Removed (prefer-repo): ~/$rel"
         else
-            log_info "Backed up: ~/$rel → $BACKUP_DIR/$rel"
+            # Backup existing regular file (handle immutable files)
+            mkdir -p "$BACKUP_DIR/$(dirname "$rel")" 2>/dev/null || true
+            if ! mv "$dest" "$BACKUP_DIR/$rel" 2>/dev/null; then
+                # Try removing immutable attribute (needs sudo)
+                if sudo chattr -i "$dest" 2>/dev/null; then
+                    mv "$dest" "$BACKUP_DIR/$rel"
+                    log_info "Backed up (removed immutable): ~/$rel → $BACKUP_DIR/$rel"
+                else
+                    log_skip "~/$rel (cannot move — immutable or permission denied, skipping)"
+                    return
+                fi
+            else
+                log_info "Backed up: ~/$rel → $BACKUP_DIR/$rel"
+            fi
         fi
     fi
 
-    ln -sf "$src" "$dest"
+    if ! ln -sf "$src" "$dest" 2>/dev/null; then
+        log_skip "~/$rel (cannot create symlink — permission denied)"
+        return
+    fi
     log_link "~/$rel → $src"
 }
 
@@ -626,7 +646,7 @@ echo -e "${BOLD}╚════════════════════�
 echo ""
 echo -e "  Repo:  ${CYAN}$DOTDIR${RESET}"
 echo -e "  Home:  ${CYAN}$HOME${RESET}"
-echo -e "  Flags: sync=${DO_SYNC} link=${DO_LINK} verify=${DO_VERIFY} dry-run=${DRY_RUN}"
+echo -e "  Flags: sync=${DO_SYNC} link=${DO_LINK} verify=${DO_VERIFY} dry-run=${DRY_RUN} prefer=${PREFER}"
 echo ""
 
 if [[ "$DO_SYNC" == true ]]; then
