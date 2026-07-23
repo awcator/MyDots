@@ -1,0 +1,61 @@
+#!/bin/bash
+# claudeload — switch Claude Code backend in current shell
+# Usage: source claudeload opus|glm|sonnet|list
+
+case "${1:-list}" in
+  opus)
+    export ANTHROPIC_BASE_URL=http://localhost:4141
+    export ANTHROPIC_AUTH_TOKEN=dummy
+    export ANTHROPIC_MODEL=claude-opus-4.6
+    export ANTHROPIC_DEFAULT_SONNET_MODEL=claude-opus-4.6
+    export ANTHROPIC_SMALL_FAST_MODEL=claude-haiku-4.5
+    export ANTHROPIC_DEFAULT_HAIKU_MODEL=claude-haiku-4.5
+    echo "Loaded: claude-opus-4.6 (port 4141, original)"
+    ;;
+  glm)
+    export ANTHROPIC_BASE_URL=http://localhost:4142
+    export ANTHROPIC_AUTH_TOKEN=dummy
+    export ANTHROPIC_MODEL=glm-5.2
+    export ANTHROPIC_DEFAULT_SONNET_MODEL=glm-5.2
+    export ANTHROPIC_SMALL_FAST_MODEL=glm-5.2
+    export ANTHROPIC_DEFAULT_HAIKU_MODEL=glm-5.2
+    echo "Loaded: glm-5.2 (port 4142, WindsurfAPI, 1.5 credits)"
+    ;;
+  sonnet)
+    export ANTHROPIC_BASE_URL=http://localhost:4142
+    export ANTHROPIC_AUTH_TOKEN=dummy
+    export ANTHROPIC_MODEL=claude-sonnet-4.6
+    export ANTHROPIC_DEFAULT_SONNET_MODEL=claude-sonnet-4.6
+    export ANTHROPIC_SMALL_FAST_MODEL=claude-haiku-4.5
+    export ANTHROPIC_DEFAULT_HAIKU_MODEL=claude-haiku-4.5
+    echo "Loaded: claude-sonnet-4.6 (port 4142, WindsurfAPI, 4 credits)"
+    ;;
+  o47)
+    export ANTHROPIC_BASE_URL=http://localhost:4142
+    export ANTHROPIC_AUTH_TOKEN=dummy
+    export ANTHROPIC_MODEL=claude-opus-4-7-low
+    export ANTHROPIC_DEFAULT_SONNET_MODEL=claude-opus-4-7-low
+    export ANTHROPIC_SMALL_FAST_MODEL=claude-haiku-4.5
+    export ANTHROPIC_DEFAULT_HAIKU_MODEL=claude-haiku-4.5
+    echo "Loaded: claude-opus-4-7-low (port 4142, WindsurfAPI, 6 credits)"
+    ;;
+  status|s)
+    echo "ANTHROPIC_BASE_URL=$ANTHROPIC_BASE_URL"
+    echo "ANTHROPIC_MODEL=$ANTHROPIC_MODEL"
+    echo "ANTHROPIC_SMALL_FAST_MODEL=$ANTHROPIC_SMALL_FAST_MODEL"
+    ;;
+  *)
+    echo "claudeload — switch Claude Code backend"
+    echo ""
+    echo "  opus    claude-opus-4.6      port 4141  6 credits (original)"
+    echo "  glm     glm-5.2              port 4142  1.5 credits (cheapest)"
+    echo "  sonnet  claude-sonnet-4.6    port 4142  4 credits"
+    echo "  o47     claude-opus-4-7-low  port 4142  6 credits (newer opus)"
+    echo "  status  show current config"
+    echo ""
+    echo "Usage: source claudeload <profile>"
+    ;;
+esac
+
+export DISABLE_NON_ESSENTIAL_MODEL_CALLS=1
+export CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1

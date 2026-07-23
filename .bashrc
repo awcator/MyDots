@@ -122,14 +122,8 @@ eval "$(pyenv init - bash)"
 
 # --- OTP secrets (not in repo) ---
 [[ -f "$HOME/.otp_secrets" ]] && source "$HOME/.otp_secrets"
-export ANTHROPIC_BASE_URL=http://localhost:4141
-export ANTHROPIC_AUTH_TOKEN=dummy
-export ANTHROPIC_MODEL=claude-opus-4.6
-export ANTHROPIC_DEFAULT_SONNET_MODEL=claude-opus-4.6
-export ANTHROPIC_SMALL_FAST_MODEL=claude-haiku-4.5
-export ANTHROPIC_DEFAULT_HAIKU_MODEL=claude-haiku-4.5
-export DISABLE_NON_ESSENTIAL_MODEL_CALLS=1
-export CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
+# --- Claude Code backend (switch with: source claudeload opus|glm|sonnet|o47) ---
+source claudeload opus 2>/dev/null
 
 # --- Kitty word highlighting ---
 # Handled by watcher: ~/.config/kitty/auto_marker.py
