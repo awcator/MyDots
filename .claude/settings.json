@@ -95,5 +95,7 @@
   "tui": "fullscreen",
   "skipDangerousModePermissionPrompt": true,
   "verbose": true,
-  "skipAutoPermissionPrompt": true
+  "skipAutoPermissionPrompt": true,
+  "awaySummaryEnabled": true,
+  "autoCompactEnabled": true
 }

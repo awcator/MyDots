@@ -13,5 +13,5 @@ if [ -n "$external_connected" ]; then
     i3-msg 'bar mode invisible bar_laptop'
 else
     # No external monitor — show laptop bar
-    i3-msg 'bar mode dock bar_laptop'
+    i3-msg 'bar mode hide bar_laptop'
 fi
