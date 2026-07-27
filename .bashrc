@@ -122,8 +122,8 @@ eval "$(pyenv init - bash)"
 
 # --- OTP secrets (not in repo) ---
 [[ -f "$HOME/.otp_secrets" ]] && source "$HOME/.otp_secrets"
-# --- Claude Code backend (switch with: source claudeload opus|glm|sonnet|o47) ---
-source claudeload opus 2>/dev/null
+# --- Claude Code backend (switch with: source claudeload opus|glm) ---
+CLAUDELOAD_QUIET=1 source claudeload opus 2>/dev/null
 
 # --- Kitty word highlighting ---
 # Handled by watcher: ~/.config/kitty/auto_marker.py
