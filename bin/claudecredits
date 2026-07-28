@@ -1,0 +1,110 @@
+#!/bin/bash
+# claudecredits — pull live credit rates from the Windsurf upstream API
+# Usage: claudecredits [grep pattern]
+#
+# Reads the account token from the running proxy's accounts.json (or .env).
+# Shows every model selector the upstream catalog exposes, sorted by live
+# credit cost. Pipe through grep to filter, e.g.:
+#   claudecredits glm
+#   claudecredits claude
+#   claudecredits '4.6'        # matches both 4-6 and 4.6 in selector/label
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# Try to find the WindsurfAPI project root (where src/ lives)
+PROJ=""
+for c in \
+  "/home/awcator/Documents/WindsurfAPI" \
+  "$(dirname "$SCRIPT_DIR")/Documents/WindsurfAPI" \
+  "$SCRIPT_DIR/../Documents/WindsurfAPI"; do
+  if [ -f "$c/src/devin-connect-catalog.js" ]; then PROJ="$c"; break; fi
+done
+if [ -z "$PROJ" ]; then
+  echo "ERROR: cannot locate WindsurfAPI/src/ — edit PROJ in $0" >&2
+  exit 1
+fi
+
+# ── Extract token ──────────────────────────────────────────────
+TOKEN=""
+
+# 1) Try .env DEVIN_CONNECT_TOKEN / WINDSURF_API_KEY
+if [ -f "$PROJ/.env" ]; then
+  TOKEN=$(grep -E '^(DEVIN_CONNECT_TOKEN|WINDSURF_API_KEY)=' "$PROJ/.env" 2>/dev/null | head -1 | cut -d= -f2- | tr -d '"'"'"' ' || true)
+fi
+
+# 2) Try accounts.json (may need sudo for docker-owned file)
+if [ -z "$TOKEN" ]; then
+  for f in "$PROJ/.docker-data/data/accounts.json" "$PROJ/data/accounts.json" "$PROJ/Windsurf_data/accounts.json"; do
+    if [ -f "$f" ]; then
+      TOKEN=$(sudo cat "$f" 2>/dev/null | python3 -c "
+import json,sys
+try:
+  d=json.load(sys.stdin)
+  if isinstance(d,list):
+    for a in d:
+      k=a.get('apiKey') or a.get('token') or ''
+      if k: print(k); break
+  elif isinstance(d,dict):
+    for v in d.values():
+      if isinstance(v,dict):
+        k=v.get('apiKey') or v.get('token') or ''
+        if k: print(k); break
+except: pass
+" 2>/dev/null || true)
+      [ -n "$TOKEN" ] && break
+    fi
+  done
+fi
+
+if [ -z "$TOKEN" ]; then
+  echo "ERROR: no token found in .env or accounts.json" >&2
+  exit 1
+fi
+
+# ── Pull live catalog + credit rate table ──────────────────────
+cd "$PROJ"
+node --input-type=module -e "
+import { fetchCatalog, fetchUserStatus } from './src/devin-connect-catalog.js';
+
+const token = process.argv[1];
+const filter = process.argv[2] || '';
+
+// Build a label lookup from catalog
+const catalog = await fetchCatalog({ token });
+const labelMap = {};
+for (const m of catalog) labelMap[m.selector] = m.label || '';
+
+const status = await fetchUserStatus({ token, withCatalog: true });
+
+console.error('Plan: ' + status.plan + ' | Paid: ' + status.isPaid);
+if (status.balance != null) console.error('Balance: \$' + status.balance.toFixed(2));
+if (status.periodStart) console.error('Period: ' + new Date(status.periodStart).toISOString().slice(0,10) + ' → ' + new Date(status.periodEnd).toISOString().slice(0,10));
+console.error('');
+
+if (!status.rateTable || typeof status.rateTable !== 'object') {
+  console.error('No rate table returned (raw: ' + JSON.stringify(status.rateTable) + ')');
+  process.exit(1);
+}
+
+// Normalize: treat . and - as interchangeable so '4.6' matches '4-6'
+const norm = str => (str || '').toLowerCase().replace(/[.\s]/g, '-');
+const f = norm(filter);
+const entries = Object.entries(status.rateTable)
+  .filter(([s]) => !filter || norm(s).includes(f) || norm(labelMap[s]).includes(f))
+  .sort((a,b) => a[1]-b[1]);
+
+// Column widths
+const maxSel = Math.max(...entries.map(e => e[0].length), 20);
+const maxLbl = Math.max(...entries.map(e => (labelMap[e[0]]||'').length), 10);
+
+console.log('Credits    Selector' + ' '.repeat(maxSel-8) + '  Label');
+console.log('─'.repeat(8) + '  ' + '─'.repeat(maxSel) + '  ' + '─'.repeat(maxLbl));
+for (const [sel, rate] of entries) {
+  const lbl = labelMap[sel] || '';
+  const r = rate < 10 ? rate.toFixed(1) : rate.toFixed(1);
+  console.log(r.padStart(8) + '  ' + sel.padEnd(maxSel) + '  ' + lbl);
+}
+console.log('─'.repeat(8 + 2 + maxSel + 2 + maxLbl));
+console.log(entries.length + ' models shown');
+" "$TOKEN" "${1:-}" 2>&1
