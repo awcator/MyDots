@@ -8,3 +8,5 @@ bin/otp
 credentials.json
 id_rsa
 id_ed25519
+.idea
+.claude

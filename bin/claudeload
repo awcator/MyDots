@@ -19,7 +19,7 @@ case "${1:-list}" in
     export ANTHROPIC_DEFAULT_SONNET_MODEL=glm-5.2
     export ANTHROPIC_SMALL_FAST_MODEL=glm-5.2
     export ANTHROPIC_DEFAULT_HAIKU_MODEL=glm-5.2
-    [[ -z "$CLAUDELOAD_QUIET" ]] && echo "Loaded: glm-5.2 (port 4142, WindsurfAPI, 1.5 credits)"
+    [[ -z "$CLAUDELOAD_QUIET" ]] && echo "Loaded: glm-5.2 High (port 4142, WindsurfAPI, 3 credits — run 'claudecredits glm' for live rates)"
     ;;
   status|s)
     echo "ANTHROPIC_BASE_URL=$ANTHROPIC_BASE_URL"
@@ -29,9 +29,10 @@ case "${1:-list}" in
   *)
     echo "claudeload — switch Claude Code backend"
     echo ""
-    echo "  opus    claude-opus-4.6  port 4141  6 credits (original)"
-    echo "  glm     glm-5.2          port 4142  1.5 credits (cheapest)"
+    echo "  opus    claude-opus-4.6  port 4141  4.8 credits (live)"
+    echo "  glm     glm-5.2 High     port 4142  3 credits (live)"
     echo "  status  show current config"
+    echo "  credits run 'claudecredits' to pull live rates from upstream"
     echo ""
     echo "Usage: source claudeload <profile>"
     ;;
