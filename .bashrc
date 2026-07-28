@@ -10,7 +10,7 @@ export TMUX_TMPDIR=/var/tmp/tmux
 export PATH="${HOME}/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin:${HOME}/Android/Sdk/platform-tools/:/usr/lib/jvm/default/bin/:/var/lib/snapd/snap/bin/:/opt/cuda/bin/:/usr/lib/emscripten/"
 export PATH="${PATH}:/usr/local/sbin:/opt/bin:/usr/bin/core_perl:/usr/games/bin:${HOME}/.local/bin/:${HOME}/go/bin/:~/.pyenv/versions/2.7.18/bin/"
 export PATH="$HOME/.npm-global/bin:$PATH"
-export PATH="$PATH:/home/awcator/.local/share/JetBrains/Toolbox/scripts"
+export PATH="$PATH:${HOME}/.local/share/JetBrains/Toolbox/scripts"
 
 # --- Git branch for PS1 ---
 parse_git_branch() {
@@ -125,9 +125,6 @@ eval "$(pyenv init - bash)"
 # --- Claude Code backend (switch with: source claudeload opus|glm) ---
 CLAUDELOAD_QUIET=1 source claudeload opus 2>/dev/null
 
-# --- Kitty word highlighting ---
-# Handled by watcher: ~/.config/kitty/auto_marker.py
-# (auto-applies to all windows including non-shell ones like ssh, docker, etc.)
 
 # HSTR configuration (history size managed above - keep unlimited)
 alias hh=hstr
