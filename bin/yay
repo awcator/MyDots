@@ -1,0 +1,765 @@
+#!/bin/bash
+# ╔══════════════════════════════════════════════════════════════════════════════╗
+# ║  AUR-GUARD v2 — Multi-Layer AUR Package Security Scanner                   ║
+# ║                                                                            ║
+# ║  Layers:                                                                   ║
+# ║    1. Static binary analysis   (readelf, objdump, strings, entropy, clamav)║
+# ║    2. PKGBUILD semantic analysis (source parsing, orphan files, namcap)    ║
+# ║    3. Git & AUR forensics      (RPC metadata, commit history, force-push)  ║
+# ║    4. AI deep analysis          (claude -p with full context from 1-3)     ║
+# ║                                                                            ║
+# ║  Commands executed:                                                        ║
+# ║    pacman -Si, git clone, readelf, objdump, strings, file, clamdscan,      ║
+# ║    shellcheck, namcap, curl (AUR RPC + source HEAD), claude -p             ║
+# ║                                                                            ║
+# ║  Bypass: /sbin/yay -S <package>                                            ║
+# ╚══════════════════════════════════════════════════════════════════════════════╝
+
+set -euo pipefail
+
+REAL_YAY="/sbin/yay"
+LOG_DIR="$HOME/.local/share/aur-guard"
+LOG_FILE="$LOG_DIR/audit.log"
+mkdir -p "$LOG_DIR"
+
+RED='\033[1;31m'
+YEL='\033[1;33m'
+GRN='\033[1;32m'
+CYN='\033[1;36m'
+BLD='\033[1m'
+DIM='\033[2m'
+RST='\033[0m'
+
+# ─── Mode Detection ──────────────────────────────────────────────────────────
+
+NOCONFIRM=false
+for arg in "$@"; do
+    [[ "$arg" == "--noconfirm" ]] && NOCONFIRM=true
+done
+
+# ─── Utilities ────────────────────────────────────────────────────────────────
+
+declare -a FINDINGS=()  # Each entry: "SEVERITY|category|detail"
+
+finding() {
+    # $1=RED|YEL|INFO  $2=category  $3=detail
+    FINDINGS+=("$1|$2|$3")
+}
+
+alert() {
+    local urgency="$1" title="$2" body="$3"
+    notify-send -u "$urgency" -a "AUR-GUARD" -i "security-high" "$title" "$body" 2>/dev/null &
+}
+
+log_event() {
+    local pkg="$1" verdict="$2" details="$3"
+    echo "[$(date -Is)] pkg=$pkg verdict=$verdict details=$details" >> "$LOG_FILE"
+}
+
+count_severity() {
+    local sev="$1"
+    local count=0
+    for f in "${FINDINGS[@]+"${FINDINGS[@]}"}"; do
+        [[ "$f" == "$sev|"* ]] && ((count++))
+    done
+    echo "$count"
+}
+
+get_findings_summary() {
+    local summary=""
+    for f in "${FINDINGS[@]+"${FINDINGS[@]}"}"; do
+        IFS='|' read -r sev cat detail <<< "$f"
+        case "$sev" in
+            RED) summary+="• [CRITICAL] $cat: $detail\n" ;;
+            YEL) summary+="• [WARNING] $cat: $detail\n" ;;
+        esac
+    done
+    echo -e "$summary"
+}
+
+display_findings() {
+    local red_count=$(count_severity "RED")
+    local yel_count=$(count_severity "YEL")
+    local info_count=$(count_severity "INFO")
+
+    if [ "$red_count" -gt 0 ]; then
+        echo -e "  ${RED}━━━ CRITICAL ($red_count) ━━━${RST}"
+        for f in "${FINDINGS[@]}"; do
+            [[ "$f" == "RED|"* ]] || continue
+            IFS='|' read -r _ cat detail <<< "$f"
+            echo -e "  ${RED}✗${RST} [$cat] $detail"
+        done
+        echo ""
+    fi
+    if [ "$yel_count" -gt 0 ]; then
+        echo -e "  ${YEL}━━━ WARNING ($yel_count) ━━━${RST}"
+        for f in "${FINDINGS[@]}"; do
+            [[ "$f" == "YEL|"* ]] || continue
+            IFS='|' read -r _ cat detail <<< "$f"
+            echo -e "  ${YEL}!${RST} [$cat] $detail"
+        done
+        echo ""
+    fi
+    if [ "$info_count" -gt 0 ]; then
+        echo -e "  ${DIM}━━━ INFO ($info_count) ━━━${RST}"
+        for f in "${FINDINGS[@]}"; do
+            [[ "$f" == "INFO|"* ]] || continue
+            IFS='|' read -r _ cat detail <<< "$f"
+            echo -e "  ${DIM}·${RST} [$cat] $detail"
+        done
+        echo ""
+    fi
+}
+
+# ─── Argument Parsing ────────────────────────────────────────────────────────
+
+get_packages() {
+    local pkgs=()
+    for arg in "$@"; do
+        case "$arg" in
+            -S|-Si|-Ss|-Sc|-Scc|-Sy|-Su|-Syu|-R*|-Q*|-U*|-D*|-F*|-G|-P|-Y) continue ;;
+            --*) continue ;;
+            -*) continue ;;
+            *) pkgs+=("$arg") ;;
+        esac
+    done
+    echo "${pkgs[@]}"
+}
+
+is_install() {
+    for arg in "$@"; do
+        case "$arg" in
+            -S) return 0 ;;
+            -S[^sicqlduypf]*) return 0 ;;
+        esac
+    done
+    local has_flag=false
+    for arg in "$@"; do [[ "$arg" == -* ]] && has_flag=true; done
+    if ! $has_flag && [ $# -gt 0 ]; then return 0; fi
+    return 1
+}
+
+is_aur_package() {
+    ! pacman -Si "$1" &>/dev/null
+}
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# LAYER 1: Static Binary & File Analysis
+# ═══════════════════════════════════════════════════════════════════════════════
+
+scan_layer1_binaries() {
+    local dir="$1"
+    local pkg="$2"
+
+    echo -e "  ${DIM}[L1] Binary & file analysis...${RST}"
+
+    # --- ClamAV scan ---
+    if command -v clamdscan &>/dev/null; then
+        local clam_out=$(clamdscan --no-summary --infected "$dir" 2>/dev/null || true)
+        if [ -n "$clam_out" ]; then
+            finding "RED" "clamav" "Malware signature detected: $clam_out"
+        fi
+    elif command -v clamscan &>/dev/null; then
+        local clam_out=$(clamscan --no-summary --infected -r "$dir" 2>/dev/null || true)
+        if [ -n "$clam_out" ]; then
+            finding "RED" "clamav" "Malware signature detected: $clam_out"
+        fi
+    fi
+
+    # --- Scan all files ---
+    while IFS= read -r -d '' f; do
+        local fname=$(basename "$f")
+        local ftype=$(file -b "$f" 2>/dev/null)
+
+        # ELF binary detection
+        if echo "$ftype" | grep -q "ELF"; then
+            finding "RED" "binary" "ELF executable in package tree: $fname ($ftype)"
+
+            # readelf analysis
+            if command -v readelf &>/dev/null; then
+                # Check for stripped binary (harder to audit)
+                if readelf -S "$f" 2>/dev/null | grep -q "\.debug_info"; then
+                    finding "INFO" "binary" "$fname has debug symbols (less suspicious)"
+                else
+                    finding "YEL" "binary" "$fname is stripped (no debug info — cannot audit easily)"
+                fi
+
+                # Check for unusual sections (packed/encrypted)
+                local unusual_sections=$(readelf -S "$f" 2>/dev/null | grep -oP '\[\s*\d+\]\s+\.\S+' | grep -ivE '\.(text|data|bss|rodata|symtab|strtab|shstrtab|rela|plt|got|init|fini|dynamic|dynstr|dynsym|note|gnu|comment|debug|eh_frame|interp|hash)' | awk '{print $2}')
+                if [ -n "$unusual_sections" ]; then
+                    finding "YEL" "binary" "$fname has unusual ELF sections: $unusual_sections"
+                fi
+
+                # Dynamic symbols — network & exec
+                local dyn_syms=$(readelf -W --dyn-syms "$f" 2>/dev/null | awk '{print $NF}')
+                local net_syms=$(echo "$dyn_syms" | grep -iE '^(socket|connect|bind|listen|accept|send|recv|sendto|recvfrom|getaddrinfo|inet_addr|inet_pton|setsockopt)$' | sort -u | tr '\n' ' ')
+                local exec_syms=$(echo "$dyn_syms" | grep -iE '^(system|exec[lv]e?p?|popen|fork|clone|dlopen)$' | sort -u | tr '\n' ' ')
+
+                [ -n "$net_syms" ] && finding "RED" "binary" "$fname imports network functions: $net_syms"
+                [ -n "$exec_syms" ] && finding "RED" "binary" "$fname imports command execution: $exec_syms"
+            fi
+
+            # Entropy analysis (detect packed/encrypted payloads)
+            if command -v objdump &>/dev/null; then
+                # Get .text section entropy approximation
+                local text_bytes=$(objdump -s -j .text "$f" 2>/dev/null | tail -n +5 | awk '{for(i=2;i<=5;i++) print $i}' | tr -d ' \n' | wc -c)
+                local unique_bytes=$(objdump -s -j .text "$f" 2>/dev/null | tail -n +5 | awk '{for(i=2;i<=5;i++) print $i}' | fold -w2 | sort -u | wc -l)
+                if [ "$text_bytes" -gt 100 ] && [ "$unique_bytes" -gt 240 ]; then
+                    finding "YEL" "entropy" "$fname .text section has very high entropy (possibly packed/encrypted)"
+                fi
+            fi
+
+            # Suspicious strings in binary
+            if command -v strings &>/dev/null; then
+                local sus_strings=$(strings "$f" 2>/dev/null | grep -iE '(/tmp/|/dev/shm|\.onion|tor2web|pastebin|curl |wget |/bin/sh|/bin/bash|chmod \+|base64)' | head -5)
+                [ -n "$sus_strings" ] && finding "RED" "strings" "$fname contains suspicious strings: $(echo "$sus_strings" | tr '\n' '; ')"
+            fi
+
+        # Script files that are executable but not referenced
+        elif echo "$ftype" | grep -qiE "script|text" && [ -x "$f" ]; then
+            if [ "$fname" != "PKGBUILD" ] && [[ "$fname" != *.install ]]; then
+                finding "YEL" "file" "Executable script in tree: $fname"
+            fi
+        fi
+    done < <(find "$dir" -path "*/.git" -prune -o -type f -print0)
+}
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# LAYER 2: PKGBUILD Semantic Analysis
+# ═══════════════════════════════════════════════════════════════════════════════
+
+scan_layer2_pkgbuild() {
+    local dir="$1"
+    local pkg="$2"
+    local pkgbuild="$dir/PKGBUILD"
+
+    echo -e "  ${DIM}[L2] PKGBUILD semantic analysis...${RST}"
+
+    # --- Parse PKGBUILD variables properly ---
+    local parsed=$(bash -c "
+        source '$pkgbuild' 2>/dev/null
+        echo \"DEPENDS=\${depends[*]}\"
+        echo \"MAKEDEPENDS=\${makedepends[*]}\"
+        echo \"SOURCE=\${source[*]}\"
+        echo \"SHA256=\${sha256sums[*]}\"
+        echo \"MD5=\${md5sums[*]}\"
+        echo \"INSTALL=\$install\"
+    " 2>/dev/null || echo "PARSE_FAILED")
+
+    if [[ "$parsed" == "PARSE_FAILED" ]]; then
+        finding "YEL" "pkgbuild" "Failed to parse PKGBUILD (syntax error or complex logic)"
+    fi
+
+    # --- Check for SKIP checksums ---
+    local skip_count=$(echo "$parsed" | grep -oiE "SKIP" | wc -l | tr -d ' ')
+    if [ "${skip_count:-0}" -gt 0 ]; then
+        finding "YEL" "integrity" "$skip_count source(s) have SKIP checksum (no integrity verification)"
+    fi
+
+    # --- Privilege escalation in build functions ---
+    local build_body=$(sed -n '/^\(build\|prepare\|package\|pkgver\)()/,/^}/p' "$pkgbuild" 2>/dev/null)
+    if echo "$build_body" | grep -qE '^\s*(sudo|pkexec|doas)\s' 2>/dev/null; then
+        local lines=$(echo "$build_body" | grep -nE '^\s*(sudo|pkexec|doas)\s' | head -3)
+        finding "RED" "privesc" "Privilege escalation in build: $lines"
+    fi
+    if echo "$build_body" | grep -qE 'chmod\s+[ugo]*\+s|chmod\s+[0-7]*4[0-7]{2}' 2>/dev/null; then
+        finding "YEL" "privesc" "SUID/SGID bit set during build (may be legitimate for sandboxed apps)"
+    fi
+
+    # --- Obfuscation detection ---
+    # Catch: base64 decode, eval $var, hex escapes, python exec/eval with encoded strings,
+    # __import__ tricks, encoded URLs, rev/xxd decode chains
+    local obfusc_patterns='base64\s*(-d|--decode)|b64decode|eval\s*[\($]|\\x[0-9a-f]{2}|exec\s*\(.*(__import__|compile|decode)|python.*-c.*exec|python.*-c.*import|echo.*\|.*rev\b|xxd\s+-r|printf.*\\\\x'
+    if grep -qE "$obfusc_patterns" "$pkgbuild" 2>/dev/null; then
+        local lines=$(grep -nE "$obfusc_patterns" "$pkgbuild" | grep -vE "^\s*#" | head -3)
+        [ -n "$lines" ] && finding "RED" "obfuscation" "Code obfuscation/eval detected: $lines"
+    fi
+
+    # --- Suspicious python/perl/ruby one-liners in build ---
+    if echo "$build_body" | grep -qE 'python.*-c\s*["\x27]|perl\s+-e|ruby\s+-e' 2>/dev/null; then
+        local oneliners=$(echo "$build_body" | grep -nE 'python.*-c\s*["\x27]|perl\s+-e|ruby\s+-e' | head -3)
+        # Only flag if it contains suspicious keywords
+        if echo "$oneliners" | grep -qiE 'exec|eval|import\s*(os|subprocess|urllib|requests|socket)|open\s*\(|urlretrieve|urlopen'; then
+            finding "RED" "code-exec" "Suspicious scripting one-liner in build: $oneliners"
+        fi
+    fi
+
+    # --- Network in build (not source array) ---
+    # .onion / tor URLs are always critical
+    if echo "$build_body" | grep -qE '\.onion|tor2web' 2>/dev/null; then
+        local lines=$(echo "$build_body" | grep -nE '\.onion|tor2web' | head -3)
+        finding "RED" "network" "Tor/onion URL in build: $lines"
+    fi
+    # General network calls
+    if echo "$build_body" | grep -qE '(curl|wget|nc|ncat|socat)\s|urlretrieve|urlopen|requests\.(get|post)|socket\.connect' 2>/dev/null; then
+        local lines=$(echo "$build_body" | grep -nE '(curl|wget|nc|ncat|socat)\s|urlretrieve|urlopen|requests\.(get|post)|socket\.connect' | head -3)
+        # Piping to bash/sh is critical
+        if echo "$build_body" | grep -qE '(curl|wget).*\|\s*(ba)?sh' 2>/dev/null; then
+            finding "RED" "network" "Download piped to shell execution: $lines"
+        else
+            finding "YEL" "network" "Network calls in build functions: $lines"
+        fi
+    fi
+
+    # --- Orphan files: files in tree that aren't in source=() or standard ---
+    local source_files=$(echo "$parsed" | grep "^SOURCE=" | sed 's/SOURCE=//' | tr ' ' '\n' | xargs -I{} basename {} 2>/dev/null | sort)
+    while IFS= read -r -d '' f; do
+        local fname=$(basename "$f")
+        case "$fname" in
+            PKGBUILD|.SRCINFO|*.install|.gitignore) continue ;;
+        esac
+        local ftype=$(file -b "$f" 2>/dev/null)
+        # Detect ELF binaries regardless of extension (disguised as .png, .dat, etc)
+        if echo "$ftype" | grep -q "ELF"; then
+            if [[ "$fname" == *.png || "$fname" == *.jpg || "$fname" == *.svg || "$fname" == *.ico || "$fname" == *.dat || "$fname" == *.txt ]]; then
+                finding "RED" "disguised-binary" "ELF binary DISGUISED as $fname — likely malware"
+            elif ! echo "$source_files" | grep -qxF "$fname"; then
+                finding "RED" "orphan-file" "Unreferenced ELF binary in tree: $fname (not in source=())"
+            fi
+        elif [ -x "$f" ] && ! echo "$source_files" | grep -qxF "$fname"; then
+            case "$fname" in
+                *.patch|*.diff|*.desktop|*.png|*.svg|*.ico) ;;
+                *) finding "YEL" "orphan-file" "Unreferenced executable in tree: $fname" ;;
+            esac
+        fi
+    done < <(find "$dir" -maxdepth 1 -type f ! -name ".*" -print0)
+
+    # --- Declared .install file missing from tree ---
+    local declared_install=$(echo "$parsed" | grep "^INSTALL=" | sed 's/INSTALL=//')
+    if [ -n "$declared_install" ] && [ ! -f "$dir/$declared_install" ]; then
+        finding "YEL" "missing-file" "PKGBUILD declares install='$declared_install' but file is missing from tree"
+    fi
+
+    # --- sudo/doas as dependency ---
+    if echo "$parsed" | grep -qE "^(DEPENDS|MAKEDEPENDS)=.*\b(sudo|doas)\b"; then
+        finding "RED" "deps" "Package declares sudo/doas as dependency (unnecessary for build, potential privilege abuse)"
+    fi
+
+    # --- namcap lint ---
+    if command -v namcap &>/dev/null; then
+        local namcap_out=$(namcap "$pkgbuild" 2>/dev/null | grep -iE "error|warning" | head -5)
+        if [ -n "$namcap_out" ]; then
+            finding "INFO" "namcap" "$(echo "$namcap_out" | tr '\n' '; ')"
+        fi
+    fi
+
+    # --- .install file deep scan ---
+    for ifile in "$dir"/*.install; do
+        [ -f "$ifile" ] || continue
+        local iname=$(basename "$ifile")
+        finding "INFO" "install-hook" "Package has install hook: $iname"
+
+        # Reverse shells, network exfil
+        if grep -qE '/dev/tcp|/dev/udp|nc\s+-[elp]|ncat|mkfifo.*nc|bash\s+-i.*>&' "$ifile" 2>/dev/null; then
+            local lines=$(grep -nE '/dev/tcp|/dev/udp|nc\s+-[elp]|ncat|mkfifo.*nc|bash\s+-i.*>&' "$ifile" | head -3)
+            finding "RED" "install-hook" "REVERSE SHELL / network backdoor in $iname: $lines"
+        fi
+
+        # Privilege escalation
+        if grep -qE '^\s*(sudo|pkexec|doas|chmod\s+\+s|chown\s+root)' "$ifile" 2>/dev/null; then
+            local lines=$(grep -nE '^\s*(sudo|pkexec|doas|chmod\s+\+s|chown\s+root)' "$ifile" | head -3)
+            finding "RED" "install-hook" "Privilege escalation in $iname: $lines"
+        fi
+
+        # Persistence (cron, systemd user units, bashrc/profile modification)
+        if grep -qE 'crontab|/etc/cron|systemctl\s+enable|\.bashrc|\.bash_profile|\.profile|/etc/profile\.d' "$ifile" 2>/dev/null; then
+            local lines=$(grep -nE 'crontab|/etc/cron|systemctl\s+enable|\.bashrc|\.bash_profile|\.profile|/etc/profile\.d' "$ifile" | head -3)
+            finding "YEL" "install-hook" "Persistence mechanism in $iname: $lines"
+        fi
+
+        # Obfuscation
+        if grep -qE 'base64\s*(-d|--decode)|b64decode|eval\s|exec\s*\(' "$ifile" 2>/dev/null; then
+            local lines=$(grep -nE 'base64\s*(-d|--decode)|b64decode|eval\s|exec\s*\(' "$ifile" | head -3)
+            finding "RED" "install-hook" "Obfuscation/code execution in $iname: $lines"
+        fi
+
+        # Download in post-install
+        if grep -qE 'curl|wget|python.*urllib|requests\.(get|post)' "$ifile" 2>/dev/null; then
+            local lines=$(grep -nE 'curl|wget|python.*urllib|requests\.(get|post)' "$ifile" | head -3)
+            finding "RED" "install-hook" "Network download in $iname: $lines"
+        fi
+    done
+
+    # --- shellcheck on PKGBUILD ---
+    if command -v shellcheck &>/dev/null; then
+        local sc_out=$(shellcheck -S error "$pkgbuild" 2>/dev/null | grep -c "error" 2>/dev/null || echo "0")
+        sc_out="${sc_out//[^0-9]/}"
+        if [ "${sc_out:-0}" -gt 0 ]; then
+            finding "INFO" "shellcheck" "$sc_out error-level shell issues in PKGBUILD"
+        fi
+    fi
+}
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# LAYER 3: Git & AUR Forensics
+# ═══════════════════════════════════════════════════════════════════════════════
+
+scan_layer3_forensics() {
+    local dir="$1"
+    local pkg="$2"
+
+    echo -e "  ${DIM}[L3] Git & AUR forensics...${RST}"
+
+    # --- AUR RPC metadata ---
+    local aur_data=$(curl -sf "https://aur.archlinux.org/rpc/v5/info?arg[]=$pkg" 2>/dev/null)
+    if [ -n "$aur_data" ] && echo "$aur_data" | python3 -c "import sys,json; json.load(sys.stdin)" 2>/dev/null; then
+        local maintainer=$(echo "$aur_data" | python3 -c "import sys,json; r=json.load(sys.stdin)['results']; print(r[0].get('Maintainer','None') if r else 'None')" 2>/dev/null)
+        local votes=$(echo "$aur_data" | python3 -c "import sys,json; r=json.load(sys.stdin)['results']; print(r[0].get('NumVotes',0) if r else 0)" 2>/dev/null)
+        local popularity=$(echo "$aur_data" | python3 -c "import sys,json; r=json.load(sys.stdin)['results']; print(r[0].get('Popularity',0) if r else 0)" 2>/dev/null)
+        local first_submitted=$(echo "$aur_data" | python3 -c "import sys,json,datetime; r=json.load(sys.stdin)['results']; print(datetime.datetime.fromtimestamp(r[0].get('FirstSubmitted',0)).strftime('%Y-%m-%d') if r else 'unknown')" 2>/dev/null)
+        local last_modified=$(echo "$aur_data" | python3 -c "import sys,json,datetime; r=json.load(sys.stdin)['results']; print(datetime.datetime.fromtimestamp(r[0].get('LastModified',0)).strftime('%Y-%m-%d') if r else 'unknown')" 2>/dev/null)
+        local ood=$(echo "$aur_data" | python3 -c "import sys,json; r=json.load(sys.stdin)['results']; print(r[0].get('OutOfDate') if r else None)" 2>/dev/null)
+
+        finding "INFO" "aur-meta" "Maintainer: $maintainer | Votes: $votes | Popularity: $popularity | First submitted: $first_submitted"
+
+        if [ "$maintainer" = "None" ] || [ "$maintainer" = "null" ]; then
+            finding "YEL" "aur-meta" "Package is ORPHANED (no maintainer)"
+        fi
+        if [ "${votes:-0}" -lt 3 ]; then
+            finding "YEL" "aur-meta" "Very few votes ($votes) — low community trust"
+        fi
+
+        # Check if package is very new
+        local submitted_epoch=$(echo "$aur_data" | python3 -c "import sys,json; r=json.load(sys.stdin)['results']; print(r[0].get('FirstSubmitted',0) if r else 0)" 2>/dev/null)
+        local now_epoch=$(date +%s)
+        local age_days=$(( (now_epoch - submitted_epoch) / 86400 ))
+        if [ "$age_days" -lt 7 ]; then
+            finding "RED" "aur-meta" "Package created only $age_days day(s) ago"
+        elif [ "$age_days" -lt 30 ]; then
+            finding "YEL" "aur-meta" "Package is relatively new ($age_days days old)"
+        fi
+    fi
+
+    # --- Git history analysis ---
+    pushd "$dir" >/dev/null
+
+    local commit_count=$(git rev-list --count HEAD 2>/dev/null || echo 0)
+    local last_author=$(git log -1 --format="%an <%ae>" 2>/dev/null)
+    local last_date=$(git log -1 --format="%ai" 2>/dev/null)
+
+    finding "INFO" "git" "Last commit: $last_date by $last_author ($commit_count commits)"
+
+    # Multiple authors in recent commits
+    local recent_authors=$(git log --format="%ae" -10 2>/dev/null | sort -u)
+    local author_count=$(echo "$recent_authors" | wc -l)
+    if [ "$author_count" -gt 2 ]; then
+        finding "YEL" "git" "Multiple authors in recent history ($author_count): $(echo $recent_authors | tr '\n' ', ')"
+    fi
+
+    # Check for recent binary additions
+    local binary_adds=$(git log --diff-filter=A --name-only --pretty="" -10 2>/dev/null | while read -r fname; do
+        [ -f "$fname" ] 2>/dev/null && file -b "$fname" 2>/dev/null | grep -q "ELF" && echo "$fname"
+    done)
+    if [ -n "$binary_adds" ]; then
+        finding "RED" "git" "Binary files added in recent commits: $binary_adds"
+    fi
+
+    # Force-push detection (very few commits for established package)
+    if [ "$commit_count" -le 2 ] && [ "${age_days:-0}" -gt 30 ] && [ "${age_days:-0}" -lt 10000 ]; then
+        finding "RED" "git" "Only $commit_count commit(s) for a package $age_days days old — likely force-pushed (history wiped)"
+    elif [ "$commit_count" -le 2 ]; then
+        finding "YEL" "git" "Very few commits ($commit_count) — new or rewritten history"
+    fi
+
+    # Check if last commit message is suspicious
+    local last_msg=$(git log -1 --format="%s" 2>/dev/null)
+    if echo "$last_msg" | grep -qiE "^(initial|first|add|update)$"; then
+        finding "YEL" "git" "Generic commit message on established package: '$last_msg'"
+    fi
+
+    popd >/dev/null
+}
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# LAYER 4: Claude AI Deep Analysis
+# ═══════════════════════════════════════════════════════════════════════════════
+
+scan_layer4_ai() {
+    local dir="$1"
+    local pkg="$2"
+    local pkgbuild="$dir/PKGBUILD"
+
+    echo -e "  ${DIM}[L4] AI deep analysis...${RST}"
+
+    # Gather context
+    local install_content=""
+    for f in "$dir"/*.install; do
+        [ -f "$f" ] && install_content+="
+--- $(basename "$f") ---
+$(cat "$f")"
+    done
+
+    local binary_report=""
+    while IFS= read -r -d '' f; do
+        local ftype=$(file -b "$f" 2>/dev/null)
+        if echo "$ftype" | grep -q "ELF"; then
+            binary_report+="
+=== $(basename "$f") ===
+Type: $ftype
+Dynamic symbols: $(readelf -W --dyn-syms "$f" 2>/dev/null | awk '/FUNC.*GLOBAL/{print $NF}' | sort -u | tr '\n' ' ')
+Suspicious strings: $(strings "$f" 2>/dev/null | grep -iE '(socket|connect|exec|system|/tmp/|\.onion|curl|wget|base64|/bin/sh)' | head -10 | tr '\n' '; ')"
+        fi
+    done < <(find "$dir" -path "*/.git" -prune -o -type f -print0)
+
+    local git_log=$(cd "$dir" && git log --oneline --format="%h %ai %an: %s" -10 2>/dev/null)
+    local findings_context=$(get_findings_summary)
+
+    local prompt="You are a security auditor analyzing an Arch Linux AUR package.
+
+PACKAGE: '$pkg'
+
+AUTOMATED SCAN FINDINGS (from readelf, clamav, git forensics, AUR RPC):
+$findings_context
+
+GIT LOG:
+$git_log
+
+PKGBUILD:
+$(cat "$pkgbuild")
+${install_content:+
+INSTALL FILES:$install_content}
+${binary_report:+
+BINARY ANALYSIS:$binary_report}
+
+Provide:
+1. WALKTHROUGH: Plain-English explanation of what this PKGBUILD does step-by-step (what it downloads, builds, installs, what permissions it sets, any persistence mechanisms)
+2. VERDICT: exactly one of SAFE, SUSPICIOUS, or DANGEROUS
+3. REASONING: Why you reached that verdict, referencing specific evidence
+
+Focus on: source authenticity, build process sanity, privilege usage, persistence mechanisms, whether binaries belong there, and anything that deviates from normal packaging for this type of software."
+
+    local result
+    result=$(echo "$prompt" | claude -p 2>/dev/null)
+    local exit_code=$?
+
+    if [ $exit_code -ne 0 ] || [ -z "$result" ]; then
+        echo -e "  ${YEL}Claude unavailable${RST}"
+        return 1
+    fi
+
+    # Display
+    echo ""
+    echo -e "${CYN}╭─── Claude Analysis ───────────────────────────────────────────╮${RST}"
+    echo "$result" | while IFS= read -r line; do
+        case "$line" in
+            *WALKTHROUGH*|*VERDICT*|*REASONING*)
+                echo -e "│ ${BLD}$line${RST}" ;;
+            *DANGEROUS*)
+                echo -e "│ ${RED}$line${RST}" ;;
+            *SUSPICIOUS*)
+                echo -e "│ ${YEL}$line${RST}" ;;
+            *SAFE*)
+                echo -e "│ ${GRN}$line${RST}" ;;
+            *)
+                echo -e "│ $line" ;;
+        esac
+    done
+    echo -e "${CYN}╰───────────────────────────────────────────────────────────────╯${RST}"
+    echo ""
+
+    # Extract verdict
+    if echo "$result" | grep -qi "VERDICT.*DANGEROUS\|DANGEROUS.*VERDICT"; then
+        echo "DANGEROUS"
+    elif echo "$result" | grep -qi "VERDICT.*SUSPICIOUS\|SUSPICIOUS.*VERDICT"; then
+        echo "SUSPICIOUS"
+    else
+        echo "SAFE"
+    fi
+}
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# MAIN VALIDATION
+# ═══════════════════════════════════════════════════════════════════════════════
+
+validate_package() {
+    local pkg="$1"
+    local tmpdir=$(mktemp -d)
+    FINDINGS=()
+
+    echo -e "${BLD}╔══════════════════════════════════════════════════════════════╗${RST}"
+    echo -e "${BLD}║  AUR-GUARD: Scanning '$pkg'${RST}"
+    echo -e "${BLD}╚══════════════════════════════════════════════════════════════╝${RST}"
+
+    # Fetch
+    echo -e "  ${DIM}Cloning...${RST}"
+    if ! git clone --quiet --depth 50 "https://aur.archlinux.org/${pkg}.git" "$tmpdir/$pkg" 2>/dev/null; then
+        echo -e "  ${YEL}Could not fetch '$pkg' from AUR${RST}"
+        rm -rf "$tmpdir"
+        return 0
+    fi
+
+    [ ! -f "$tmpdir/$pkg/PKGBUILD" ] && { rm -rf "$tmpdir"; return 0; }
+
+    # Run all layers
+    scan_layer1_binaries "$tmpdir/$pkg" "$pkg"
+    scan_layer2_pkgbuild "$tmpdir/$pkg" "$pkg"
+    scan_layer3_forensics "$tmpdir/$pkg" "$pkg"
+
+    # Display findings
+    echo ""
+    display_findings
+
+    local red_count=$(count_severity "RED")
+    local yel_count=$(count_severity "YEL")
+
+    # Check for instant-kill findings (so severe that 1 alone = block)
+    local has_critical_kill=false
+    for f in "${FINDINGS[@]+"${FINDINGS[@]}"}"; do
+        case "$f" in
+            "RED|"*"REVERSE SHELL"*) has_critical_kill=true ;;
+            "RED|"*"DISGUISED"*) has_critical_kill=true ;;
+            "RED|"*"Malware signature"*) has_critical_kill=true ;;
+            "RED|"*"Tor/onion"*) has_critical_kill=true ;;
+            "RED|"*"piped to shell"*) has_critical_kill=true ;;
+            "RED|install-hook|Network download"*) has_critical_kill=true ;;
+            "RED|code-exec|"*) has_critical_kill=true ;;
+            "RED|obfuscation|"*) has_critical_kill=true ;;
+        esac
+    done
+
+    # Instant block on strong evidence (2+ critical, OR any instant-kill finding)
+    if [ "$red_count" -ge 2 ] || $has_critical_kill; then
+        local summary=$(get_findings_summary)
+        echo -e "${RED}╔══════════════════════════════════════════════════════════════╗${RST}"
+        echo -e "${RED}║  BLOCKED — $red_count critical findings detected             ${RST}"
+        echo -e "${RED}╚══════════════════════════════════════════════════════════════╝${RST}"
+        alert "critical" "🚨 AUR-GUARD: $pkg BLOCKED" "$red_count critical issues:\n$(echo -e "$summary" | head -5)"
+        log_event "$pkg" "BLOCKED" "$red_count critical findings (instant block)"
+        rm -rf "$tmpdir"
+        if $NOCONFIRM; then
+            echo -e "${RED}[aur-guard] --noconfirm → BLOCK${RST}"
+            return 1
+        fi
+        read -p "Override? (type 'I ACCEPT THE RISK'): " answer
+        [[ "$answer" == "I ACCEPT THE RISK" ]] && return 0 || return 1
+    fi
+
+    # AI analysis
+    local ai_verdict
+    ai_verdict=$(scan_layer4_ai "$tmpdir/$pkg" "$pkg")
+    rm -rf "$tmpdir"
+
+    # Decision
+    case "$ai_verdict" in
+        DANGEROUS)
+            alert "critical" "🚨 AUR-GUARD: $pkg" "AI verdict: DANGEROUS\n$(get_findings_summary | head -3)"
+            log_event "$pkg" "BLOCKED" "AI verdict: DANGEROUS, $red_count red, $yel_count yellow"
+            if $NOCONFIRM; then
+                echo -e "${RED}[aur-guard] --noconfirm → BLOCK${RST}"
+                return 1
+            fi
+            read -p "Override? (type 'I ACCEPT THE RISK'): " answer
+            [[ "$answer" == "I ACCEPT THE RISK" ]] && return 0 || return 1
+            ;;
+        SUSPICIOUS)
+            alert "normal" "⚠️ AUR-GUARD: $pkg" "AI verdict: SUSPICIOUS\n$(get_findings_summary | head -3)"
+            log_event "$pkg" "SUSPICIOUS" "AI verdict: SUSPICIOUS, $red_count red, $yel_count yellow"
+            if $NOCONFIRM; then
+                echo -e "${YEL}[aur-guard] --noconfirm → BLOCK (suspicious)${RST}"
+                return 1
+            fi
+            read -p "Proceed anyway? [y/N] " answer
+            [[ "$answer" =~ ^[Yy]$ ]] && return 0 || return 1
+            ;;
+        *)
+            log_event "$pkg" "ALLOWED" "AI verdict: SAFE, $red_count red, $yel_count yellow"
+            echo -e "${GRN}[aur-guard] ✓ Passed${RST}"
+            if $NOCONFIRM; then
+                echo -e "${GRN}[aur-guard] --noconfirm → ALLOW${RST}"
+                return 0
+            fi
+            read -p "Proceed? [Y/n] " answer
+            [[ "$answer" =~ ^[Nn]$ ]] && return 1 || return 0
+            ;;
+    esac
+}
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# RECURSIVE AUR DEPENDENCY RESOLUTION
+# ═══════════════════════════════════════════════════════════════════════════════
+
+declare -A _aur_visited=()
+declare -a _aur_dep_list=()
+
+resolve_aur_deps_recursive() {
+    local pkg="$1"
+    local tmpdir=$(mktemp -d)
+
+    if git clone --quiet --depth 1 "https://aur.archlinux.org/${pkg}.git" "$tmpdir/$pkg" 2>/dev/null; then
+        local pkgbuild="$tmpdir/$pkg/PKGBUILD"
+        if [ -f "$pkgbuild" ]; then
+            local all_deps=$(bash -c "source '$pkgbuild' 2>/dev/null; echo \${depends[*]} \${makedepends[*]}" 2>/dev/null)
+            for dep in $all_deps; do
+                dep=$(echo "$dep" | sed 's/[><=].*$//;s/\.so$//')
+                [ -z "$dep" ] && continue
+                [[ -n "${_aur_visited[$dep]+x}" ]] && continue
+                _aur_visited[$dep]=1
+                if is_aur_package "$dep"; then
+                    _aur_dep_list+=("$dep")
+                    resolve_aur_deps_recursive "$dep"
+                fi
+            done
+        fi
+    fi
+    rm -rf "$tmpdir"
+}
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# ENTRY POINT
+# ═══════════════════════════════════════════════════════════════════════════════
+
+if [ $# -eq 0 ]; then
+    :
+elif ! is_install "$@"; then
+    exec "$REAL_YAY" "$@"
+fi
+
+packages=$(get_packages "$@")
+
+if [ -z "$packages" ]; then
+    echo -e "${CYN}[aur-guard]${RST} Checking for AUR updates..."
+    mapfile -t update_pkgs < <("$REAL_YAY" -Qua 2>/dev/null | awk '{print $1}')
+
+    if [ ${#update_pkgs[@]} -eq 0 ]; then
+        echo -e "${GRN}[aur-guard]${RST} No AUR updates pending."
+        exec "$REAL_YAY" "$@"
+    fi
+
+    echo -e "${CYN}[aur-guard]${RST} ${#update_pkgs[@]} AUR update(s). Scanning..."
+    for pkg in "${update_pkgs[@]}"; do
+        if ! validate_package "$pkg"; then
+            echo -e "${RED}[aur-guard] ✗ '$pkg' BLOCKED.${RST}"
+            exit 1
+        fi
+    done
+    exec "$REAL_YAY" "$@"
+fi
+
+for pkg in $packages; do
+    if is_aur_package "$pkg"; then
+        echo -e "${CYN}[aur-guard]${RST} Resolving dependency tree for '$pkg'..."
+        _aur_visited=()
+        _aur_dep_list=()
+        _aur_visited[$pkg]=1
+        resolve_aur_deps_recursive "$pkg"
+
+        if [ ${#_aur_dep_list[@]} -gt 0 ]; then
+            echo -e "${CYN}[aur-guard]${RST} AUR deps: ${_aur_dep_list[*]}"
+            for dep in "${_aur_dep_list[@]}"; do
+                if ! validate_package "$dep"; then
+                    echo -e "${RED}[aur-guard] ✗ Dependency '$dep' BLOCKED.${RST}"
+                    exit 1
+                fi
+            done
+        fi
+
+        if ! validate_package "$pkg"; then
+            echo -e "${RED}[aur-guard] ✗ '$pkg' BLOCKED.${RST}"
+            exit 1
+        fi
+    else
+        echo -e "${GRN}[aur-guard]${RST} '$pkg' — official repo, skipping."
+    fi
+done
+
+exec "$REAL_YAY" "$@"
