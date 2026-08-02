@@ -82,10 +82,13 @@
       "Glob",
       "Grep",
       "WebFetch",
-      "WebSearch",
+      "mcp__web-search__web_search",
       "NotebookEdit",
       "Agent",
       "Skill"
+    ],
+    "deny": [
+      "WebSearch"
     ],
     "defaultMode": "bypassPermissions"
   },
