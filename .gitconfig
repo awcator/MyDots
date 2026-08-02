@@ -1,5 +1,6 @@
 [core]
 	autocrlf = input
+	excludesfile = /home/awcator/.gitignore_global
 [credential]
 	helper = store
 [user]

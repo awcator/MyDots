@@ -96,11 +96,17 @@ fi
 # --- Exports ---
 export LD_PRELOAD=""
 export EDITOR="vim"
+export QWEN_STREAM_IDLE_TIMEOUT_MS=0
 export OLLAMA_NOPRUNE=true
+export OLLAMA_MODELS=/home/awcator/workbench/llm
+export OLLAMA_FLASH_ATTENTION=1
+export OLLAMA_KEEP_ALIVE=-1
+export QWEN_STREAM_IDLE_TIMEOUT=0
 export BUILDKIT_PROGRESS=plain
 export COLORTERM=truecolor
 
 # --- Aliases ---
+alias ollama-restart='pkill -9 ollama; pkill -9 llama-server; sleep 2; ollama serve &'
 alias ls="ls --color"
 alias shred="shred -zf"
 alias curl="curl --user-agent 'noleak'"
