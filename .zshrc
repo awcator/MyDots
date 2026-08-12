@@ -24,3 +24,7 @@ alias vi="vim"
 alias shred="shred -zf"
 alias curl="curl --user-agent 'noleak'"
 export PATH="$HOME/.npm-global/bin:$PATH"
+
+
+# Added by Antigravity CLI installer
+export PATH="/home/awcator/.local/bin:$PATH"

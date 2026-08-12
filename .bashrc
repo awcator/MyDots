@@ -145,3 +145,8 @@ if [[ $- =~ .*i.* ]]; then bind -x '"\C-r": "hstrnotiocsti"'; fi
 #sonarqube
 export SONAR_SCANNER_HOME="/opt/sonar-scanner"
 export PATH="${SONAR_SCANNER_HOME}/bin:${PATH}"
+
+
+# Added by Antigravity CLI installer
+export PATH="/home/awcator/.local/bin:$PATH"
+export PATH="$HOME/flutter/bin:$PATH"

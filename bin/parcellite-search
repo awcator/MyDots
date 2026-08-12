@@ -1,0 +1,575 @@
+#!/usr/bin/env python3
+"""Search and filter Parcellite clipboard history.
+
+Usage:
+  parcellite-search <keyword...>      Search entries (case-insensitive, OR)
+  parcellite-search -r <pattern>      Regex search
+  parcellite-search -l                List all entries (summary)
+  parcellite-search --count           Print total entry count
+  parcellite-search -i <n>            Show entry by index
+  parcellite-search -R <start-end>    Show range of entries
+  parcellite-search --context 2 foo   Show 2 lines around each match
+
+Pipe support:
+  parcellite-search foo | parcellite-search bar
+"""
+
+import argparse
+import os
+import re
+import stat
+import struct
+import sys
+
+# ── Constants ────────────────────────────────────────────────────────────────
+
+MAGIC_SIZE = 32
+STRUCT_SIZE = 32  # sizeof(struct history_item) packed
+MAGIC_PREFIX = b"1.0ParcelliteHistoryFile"
+DEFAULT_HISTORY = os.path.expanduser("~/.local/share/parcellite/history")
+SEPARATOR = "=" * 60
+
+# ANSI escapes
+BOLD = "\033[1m"
+DIM = "\033[2m"
+INVERSE = "\033[7m"
+RST = "\033[0m"
+# Colors
+CYAN = "\033[36m"
+GREEN = "\033[32m"
+YELLOW = "\033[33m"
+MAGENTA = "\033[35m"
+
+CLIP_TYPES = {1: "TEXT"}
+
+# ── Helpers ──────────────────────────────────────────────────────────────────
+
+
+def use_color():
+    """Check if we should emit ANSI codes."""
+    return sys.stdout.isatty()
+
+
+def highlight(text, term, color_on=True):
+    """Wrap matching portions of text with ANSI highlighting."""
+    if not color_on or not term:
+        return text
+    # Find all occurrences (case-insensitive, but preserve original case for display)
+    pattern = re.compile(re.escape(term), re.IGNORECASE)
+    parts = []
+    last = 0
+    for m in pattern.finditer(text):
+        parts.append(text[last : m.start()])
+        parts.append(f"{INVERSE}{BOLD}{text[m.start():m.end()]}{RST}")
+        last = m.end()
+    parts.append(text[last:])
+    return "".join(parts)
+
+
+def term_width():
+    """Get terminal width, fallback to 80."""
+    try:
+        return os.get_terminal_size().columns
+    except (ValueError, OSError):
+        return 80
+
+
+def first_line(text):
+    """Return the first non-empty line of text."""
+    for line in text.split("\n"):
+        stripped = line.strip()
+        if stripped:
+            return stripped
+    return text[:60]
+
+
+def warn(msg):
+    """Print warning to stderr."""
+    print(f"Warning: {msg}", file=sys.stderr)
+
+
+def error(msg, code=1):
+    """Print error to stderr and exit."""
+    print(f"Error: {msg}", file=sys.stderr)
+    sys.exit(code)
+
+
+# ── Binary parser ────────────────────────────────────────────────────────────
+
+
+def read_history(filepath):
+    """Parse the binary Parcellite history file.
+
+    Returns list of dicts: {text, type, flags, size}
+    """
+    entries = []
+    if not os.path.isfile(filepath):
+        error(f"history file not found at {filepath}")
+
+    with open(filepath, "rb") as f:
+        # Read and validate magic header
+        magic = f.read(MAGIC_SIZE)
+        if len(magic) < MAGIC_SIZE:
+            warn(f"file too short, missing header: {filepath}")
+            return entries
+
+        if not magic.startswith(MAGIC_PREFIX):
+            warn(f"unexpected magic: {magic.split(b'\x00')[0].decode('ascii', errors='replace')}")
+
+        while True:
+            # Read total_len
+            tl_bytes = f.read(4)
+            if len(tl_bytes) < 4:
+                break
+            total_len = struct.unpack("<I", tl_bytes)[0]
+            if total_len == 0:
+                break
+
+            # Read the 32-byte struct
+            sd = f.read(STRUCT_SIZE)
+            if len(sd) < STRUCT_SIZE:
+                warn("truncated struct at end of file")
+                break
+
+            text_len, clip_type, flags = struct.unpack_from("<Ihh", sd, 0)
+
+            # Read the text body
+            remaining = total_len - 4 - STRUCT_SIZE  # should equal text_len
+            body = f.read(remaining)
+            if len(body) < remaining:
+                warn(f"truncated entry body (expected {remaining}, got {len(body)})")
+                break
+
+            # Decode text
+            try:
+                text = body.decode("utf-8", errors="replace")
+            except Exception:
+                text = body.decode("latin-1", errors="replace")
+
+            entries.append(
+                {
+                    "text": text,
+                    "type": clip_type,
+                    "flags": flags,
+                    "size": text_len,
+                }
+            )
+
+    return entries
+
+
+# ── Stdin parser ─────────────────────────────────────────────────────────────
+
+
+def parse_entries_from_stdin():
+    """Parse entries from piped stdin (output of a previous parcellite-search run).
+
+    Format expected:
+        [N] TYPE, SIZE bytes
+        <text>
+        ============================================================
+    """
+    raw = sys.stdin.read()
+    if not raw.strip():
+        return []
+
+    entries = []
+    # Split on the metadata pattern: [N] TYPE, SIZE bytes
+    pattern = re.compile(r"^\[(\d+)\] (\w+), (\d+) bytes\s*$", re.MULTILINE)
+
+    chunks = []
+    last_end = 0
+    for m in pattern.finditer(raw):
+        # If there's a previous chunk, save it
+        if chunks:
+            chunks[-1]["text_end"] = m.start()
+        # Start new chunk
+        chunks.append(
+            {
+                "index": int(m.group(1)),
+                "type_name": m.group(2),
+                "size": int(m.group(3)),
+                "text_start": m.end() + 1,  # skip newline after metadata
+                "text_end": len(raw),
+            }
+        )
+        last_end = m.end()
+
+    # Trim trailing separators and whitespace from text_end
+    for chunk in chunks:
+        text = raw[chunk["text_start"] : chunk["text_end"]]
+        # Strip trailing separator line
+        sep_idx = text.rfind(SEPARATOR)
+        if sep_idx != -1:
+            # Check if the separator is at the end of the text block
+            line_start = text.rfind("\n", 0, sep_idx)
+            if line_start == -1:
+                line_start = 0
+            if sep_idx >= line_start:
+                text = text[:line_start].rstrip()
+        text = text.rstrip("\n")
+        entries.append(
+            {
+                "text": text,
+                "type": 1,  # assume TEXT
+                "flags": 0,
+                "size": len(text.encode("utf-8")),
+            }
+        )
+
+    return entries
+
+
+def is_stdin_piped():
+    """Check if stdin has data piped in (actual pipe/FIFO, not just non-TTY)."""
+    if sys.stdin.isatty():
+        return False
+    try:
+        mode = os.fstat(sys.stdin.fileno()).st_mode
+        return stat.S_ISFIFO(mode)
+    except OSError:
+        return False
+
+
+# ── Search ───────────────────────────────────────────────────────────────────
+
+
+def search_entries(entries, keywords=None, regex=None, case_sensitive=False, match_all=False):
+    """Filter entries by keyword or regex. Returns list of (index, entry, match_terms).
+
+    match_terms is a list of strings that matched (used for highlighting).
+    """
+    results = []
+
+    for idx, entry in enumerate(entries):
+        text = entry["text"]
+        matched_terms = []
+
+        if regex:
+            flags = 0 if case_sensitive else re.IGNORECASE
+            matches = re.findall(regex, text, flags=flags)
+            if matches:
+                matched_terms.append(regex)
+        elif keywords:
+            for kw in keywords:
+                flags = 0 if case_sensitive else re.IGNORECASE
+                if re.search(re.escape(kw), text, flags=flags):
+                    matched_terms.append(kw)
+                elif match_all:
+                    # AND mode: one keyword missing means no match
+                    break
+
+            if match_all and len(matched_terms) != len(keywords):
+                continue
+            if not match_all and not matched_terms:
+                continue
+        else:
+            # No filter — return all entries
+            pass
+
+        results.append((idx, entry, matched_terms))
+
+    return results
+
+
+# ── Output formatting ────────────────────────────────────────────────────────
+
+
+def fmt_header(idx, entry, color_on=True):
+    """Colored entry header line."""
+    type_name = CLIP_TYPES.get(entry["type"], f"TYPE_{entry['type']}")
+    if color_on:
+        return (
+            f"{BOLD}{CYAN}[{idx}]{RST}"
+            f"  {GREEN}{type_name}{RST}"
+            f"  {DIM}{entry['size']} bytes{RST}"
+        )
+    return f"[{idx}] {type_name}, {entry['size']} bytes"
+
+
+def highlight_all_terms(text, terms, color_on=True):
+    """Highlight all matched terms in the full text."""
+    if not color_on or not terms:
+        return text
+    result = text
+    for term in terms:
+        result = highlight(result, term, color_on)
+    return result
+
+
+def format_entry(idx, entry, color_on=True, matched_terms=None):
+    """Format one entry: colored header + thin rule + text (with keyword highlights)."""
+    type_name = CLIP_TYPES.get(entry["type"], f"TYPE_{entry['type']}")
+    header = fmt_header(idx, entry, color_on)
+    text = highlight_all_terms(entry["text"], matched_terms or [], color_on)
+    if color_on:
+        rule = f"{DIM}{'─' * 60}{RST}"
+    else:
+        rule = "─" * 60
+    return f"{header}\n{rule}\n{text}"
+
+
+def format_entry_list(idx, entry, width=80, color_on=True):
+    """Format one entry for --list mode: colored index + first line."""
+    line = first_line(entry["text"])
+    if len(line) > width - 12:
+        line = line[: width - 15] + "..."
+    if color_on:
+        return f"  {DIM}[{idx:4d}]{RST} {line}"
+    return f"  [{idx:4d}] {line}"
+
+
+def format_with_context(entry_text, matched_terms, context_n, color_on=True):
+    """Format entry text showing only context lines around matches."""
+    lines = entry_text.split("\n")
+    total = len(lines)
+
+    # Find all matching line indices
+    match_lines = set()
+    if matched_terms:
+        flags = re.IGNORECASE
+        for term in matched_terms:
+            for i, line in enumerate(lines):
+                if re.search(re.escape(term), line, flags=flags):
+                    match_lines.add(i)
+
+    if not match_lines:
+        # No matches? Show full text (shouldn't happen in normal flow)
+        return entry_text
+
+    # Expand context
+    context_set = set()
+    for ml in match_lines:
+        start = max(0, ml - context_n)
+        end = min(total, ml + context_n + 1)
+        context_set.update(range(start, end))
+
+    # Build output with line numbers and gaps marked
+    output_lines = []
+    prev = -2
+    for i in sorted(context_set):
+        if i > prev + 1:
+            output_lines.append(f"{DIM}  ...{RST}" if color_on else "  ...")
+        line = lines[i]
+        # Highlight matching terms in this line
+        if color_on and matched_terms and i in match_lines:
+            for term in matched_terms:
+                line = highlight(line, term, color_on)
+        output_lines.append(f"  {line}")
+        prev = i
+
+    return "\n".join(output_lines)
+
+
+# ── Main dispatch ────────────────────────────────────────────────────────────
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        prog="parcellite-search",
+        description="Search and filter Parcellite clipboard history",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""Examples:
+  parcellite-search nsfw              Search for 'nsfw' (case-insensitive)
+  parcellite-search -r 'NSFW|nsfw'    Regex search
+  parcellite-search -l                List all entries (summary)
+  parcellite-search --count           Print total entry count
+  parcellite-search -i 42             Show entry at index 42
+  parcellite-search -R 10-20          Show entries 10 through 20
+  parcellite-search -a foo bar        Entries containing both 'foo' AND 'bar'
+  parcellite-search --context 2 nsfw  Show 2 lines around each match
+  parcellite-search foo | parcellite-search bar   Pipe search
+""",
+    )
+
+    # Positional keywords
+    parser.add_argument(
+        "keywords",
+        nargs="*",
+        help="Keyword(s) to search for (case-insensitive, OR by default)",
+    )
+
+    # Search modifiers
+    parser.add_argument("-r", "--regex", help="Search with regex pattern (Python syntax)")
+    parser.add_argument(
+        "-c", "--case-sensitive", action="store_true", help="Case-sensitive search"
+    )
+    parser.add_argument(
+        "-a",
+        "--all",
+        action="store_true",
+        dest="match_all",
+        help="All keywords must match (AND logic instead of OR)",
+    )
+
+    # Modes
+    parser.add_argument("-l", "--list", action="store_true", help="List all entries as summary")
+    parser.add_argument("--count", action="store_true", help="Print total entry count only")
+    parser.add_argument("-i", "--index", type=int, help="Show entry at given index")
+    parser.add_argument(
+        "-R",
+        "--range",
+        dest="range_str",
+        help='Show entries in range, e.g. "10-20" or "10-" or "-20"',
+    )
+
+    # Display options
+    parser.add_argument(
+        "--context",
+        type=int,
+        default=0,
+        metavar="N",
+        help="Show N lines of context around each match with highlighting",
+    )
+    parser.add_argument(
+        "--no-color",
+        action="store_true",
+        help="Disable ANSI color codes",
+    )
+
+    # File
+    parser.add_argument(
+        "-f",
+        "--file",
+        help="Read from specified history file instead of default",
+    )
+
+    args = parser.parse_args()
+
+    color_on = use_color() and not args.no_color
+
+    # ── Load entries ────────────────────────────────────────────────────
+
+    if is_stdin_piped():
+        entries = parse_entries_from_stdin()
+        source_label = "stdin"
+    else:
+        filepath = args.file or DEFAULT_HISTORY
+        entries = read_history(filepath)
+        source_label = os.path.basename(filepath)
+
+    total = len(entries)
+
+    # ── Index mode ──────────────────────────────────────────────────────
+
+    if args.index is not None:
+        if args.index < 0 or args.index >= total:
+            error(f"index {args.index} out of range (0–{total - 1})")
+        idx = args.index
+        entry = entries[idx]
+        print(format_entry(idx, entry, color_on))
+        return
+
+    # ── Range mode ──────────────────────────────────────────────────────
+
+    if args.range_str:
+        try:
+            parts = args.range_str.split("-")
+            start = int(parts[0]) if parts[0] else 0
+            end = int(parts[1]) if len(parts) > 1 and parts[1] else total - 1
+            if start < 0:
+                start = 0
+            if end >= total:
+                end = total - 1
+            if start > end:
+                error(f"invalid range: start ({start}) > end ({end})")
+        except (ValueError, IndexError):
+            error(f'invalid range syntax: "{args.range_str}" (use "start-end")')
+
+        rsep = f"{DIM}{'═' * 60}{RST}" if color_on else "=" * 60
+        for idx in range(start, end + 1):
+            entry = entries[idx]
+            print(format_entry(idx, entry, color_on))
+            if idx < end:
+                print()
+                print(rsep)
+                print()
+        print(f"\n{DIM}{end - start + 1} entries shown{RST}" if color_on else f"\n{end - start + 1} entries shown")
+        return
+
+    # ── List mode ───────────────────────────────────────────────────────
+
+    if args.list:
+        width = term_width()
+        for idx, entry in enumerate(entries):
+            print(format_entry_list(idx, entry, width, color_on))
+        print(f"\n{DIM}{total} entries{RST}" if color_on else f"\n{total} entries")
+        return
+
+    # ── Search / default mode ───────────────────────────────────────────
+
+    # Determine what to search for
+    keywords = args.keywords if args.keywords else None
+    regex = args.regex
+
+    has_filter = bool(keywords or regex)
+
+    if not has_filter:
+        # No filter and no mode — bare --count or show usage
+        if args.count:
+            print(total)
+            return
+        parser.print_help()
+        print(f"\n{DIM}{total} entries in {source_label}{RST}" if color_on else f"\n{total} entries in {source_label}")
+        return
+
+    results = search_entries(
+        entries,
+        keywords=keywords,
+        regex=regex,
+        case_sensitive=args.case_sensitive,
+        match_all=args.match_all,
+    )
+
+    # ── Count mode (with filter) ─────────────────────────────────────────
+
+    if args.count:
+        print(len(results))
+        return
+
+    # ── Print results ──────────────────────────────────────────────────
+
+    sep = f"{DIM}{'═' * 60}{RST}" if color_on else "=" * 60
+
+    for i, (idx, entry, matched_terms) in enumerate(results):
+        # Header
+        print(fmt_header(idx, entry, color_on))
+
+        if args.context > 0:
+            print(format_with_context(entry["text"], matched_terms, args.context, color_on))
+        else:
+            # Highlight matched keywords in full text
+            text = highlight_all_terms(entry["text"], matched_terms, color_on)
+            # Thin rule under header to separate it from content
+            rule = f"{DIM}{'─' * 60}{RST}" if color_on else "─" * 60
+            print(rule)
+            print(text)
+
+        if i < len(results) - 1:
+            print()
+            print(sep)
+            print()
+
+    # Summary line
+    if keywords:
+        desc = " + ".join(keywords)
+    elif regex:
+        desc = regex
+    else:
+        desc = ""
+
+    if has_filter:
+        suffix = f" ({'AND' if args.match_all else 'OR'})" if keywords and len(keywords) > 1 else ""
+        case_suffix = " [case-sensitive]" if args.case_sensitive else ""
+        summary = f"{len(results)} match{'es' if len(results) != 1 else ''} for '{desc}'{suffix}{case_suffix} in {total} entries"
+    else:
+        summary = f"{len(results)} entries"
+
+    if color_on:
+        print(f"\n{DIM}{summary}{RST}")
+    else:
+        print(f"\n{summary}")
+
+
+if __name__ == "__main__":
+    main()

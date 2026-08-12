@@ -320,6 +320,15 @@ do_sync() {
         sync_file ".claude/$f"
     done
 
+    # .claude/mcp-servers (sync individual files, skip node_modules)
+    log_info "Checking .claude/mcp-servers/..."
+    find "$HOME/.claude/mcp-servers" -type f \
+        ! -path "*/node_modules/*" \
+        2>/dev/null | while read -r f; do
+        rel="${f#$HOME/}"
+        sync_file "$rel"
+    done
+
     # System /etc/ files
     log_info "Checking /etc/ configs..."
     for entry in "${ETC_FILES[@]}"; do
@@ -450,6 +459,30 @@ do_link() {
     done
     if [[ "$DRY_RUN" != true ]]; then
         chmod +x "$HOME/.claude/statusline.sh" "$HOME/.claude/claude-mirror.sh" 2>/dev/null || true
+    fi
+
+    # .claude/mcp-servers (symlink each server dir, then npm install)
+    log_info "Linking .claude/mcp-servers/..."
+    if [[ -d "$DOTDIR/.claude/mcp-servers" ]]; then
+        mkdir -p "$HOME/.claude/mcp-servers"
+        for server_dir in "$DOTDIR/.claude/mcp-servers"/*/; do
+            [[ -d "$server_dir" ]] || continue
+            local server_name
+            server_name="$(basename "$server_dir")"
+            local target="$HOME/.claude/mcp-servers/$server_name"
+            if [[ "$DRY_RUN" == true ]]; then
+                log_info "[dry-run] Would link mcp-server: $server_name"
+            else
+                rm -rf "$target"
+                ln -sfn "$server_dir" "$target"
+                log_ok "Linked mcp-server: $server_name"
+                # Install node dependencies if package.json exists
+                if [[ -f "$target/package.json" && ! -d "$target/node_modules" ]]; then
+                    log_info "Installing deps for mcp-server: $server_name"
+                    (cd "$target" && npm install --silent 2>/dev/null) || log_warn "npm install failed for $server_name"
+                fi
+            fi
+        done
     fi
 
     # System /etc/ files (require sudo)
@@ -603,6 +636,10 @@ done
 # Check .claude/
 for f in settings.json settings.local.json CLAUDE.md statusline.sh claude-mirror.sh; do
     [[ -f "$DOTDIR/.claude/$f" ]] && check_link "$HOME/.claude/$f"
+done
+for server_dir in "$DOTDIR/.claude/mcp-servers"/*/; do
+    [[ -d "$server_dir" ]] || continue
+    check_link "$HOME/.claude/mcp-servers/$(basename "$server_dir")"
 done
 
 echo ""
