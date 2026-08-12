@@ -48,6 +48,7 @@ alias ....="cd ../../.."
 alias h="history"
 alias untar='tar -xvf'
 alias o="xdg-open $1"
+alias Xc='xclip -selection clipboard -i ' 
 alias xc='xclip -selection clipboard -i ' 
 alias ok="ping google.com"
 alias cls="clear"
