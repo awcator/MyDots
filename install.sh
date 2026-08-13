@@ -3,6 +3,7 @@
 #
 # Usage:
 #   ./install.sh              # Sync system→repo, then symlink repo→home
+#   ./install.sh --prefer-repo  # Force repo versions (skip sync, remove existing)
 #   ./install.sh --sync-only  # Only copy newer system files into repo
 #   ./install.sh --link-only  # Only create symlinks (skip sync)
 #   ./install.sh --dry-run    # Show what would happen, change nothing
@@ -115,7 +116,9 @@ for arg in "$@"; do
         --verify)       DO_VERIFY=true ;;
         --dry-run)      DRY_RUN=true ;;
         --prefer-local) PREFER="local" ;;
-        --prefer-repo)  PREFER="repo" ;;
+        # Repo wins: skip the sync phase entirely so the system's current
+        # files don't overwrite the fixed repo versions before linking.
+        --prefer-repo)  PREFER="repo"; DO_SYNC=false ;;
         --help|-h)
             echo "Usage: $0 [OPTIONS]"
             echo ""
@@ -123,7 +126,7 @@ for arg in "$@"; do
             echo "  --sync-only     Only sync system files → repo (no linking)"
             echo "  --link-only     Only create symlinks (skip sync)"
             echo "  --prefer-local  Keep local files when conflicts exist (default)"
-            echo "  --prefer-repo   Force repo versions, removing existing files"
+            echo "  --prefer-repo   Force repo versions (skips sync), removing existing files"
             echo "  --verify        Run Docker archlinux verification after install"
             echo "  --dry-run       Show what would be done without changing anything"
             echo ""
@@ -141,6 +144,8 @@ done
 log_info()    { echo -e "${BLUE}[INFO]${RESET} $*"; }
 log_sync()    { echo -e "${CYAN}[SYNC]${RESET} $*"; }
 log_link()    { echo -e "${GREEN}[LINK]${RESET} $*"; }
+log_ok()      { echo -e "${GREEN}[OK]${RESET}   $*"; }
+log_warn()    { echo -e "${YELLOW}[WARN]${RESET} $*"; }
 log_skip()    { echo -e "${YELLOW}[SKIP]${RESET} $*"; }
 log_new()     { echo -e "${GREEN}[NEW]${RESET}  $*"; }
 log_diff()    { echo -e "${RED}[DIFF]${RESET} $*"; }
@@ -282,7 +287,9 @@ do_sync() {
 
     # .vim directory
     if [[ -d "$HOME/.vim" ]]; then
-        find "$HOME/.vim" -type f 2>/dev/null | while read -r sys_file; do
+        find "$HOME/.vim" -type f \
+            ! -path "*/.git/*" ! -path "*/__pycache__/*" ! -name "*.pyc" \
+            2>/dev/null | while read -r sys_file; do
             local rel="${sys_file#$HOME/}"
             sync_file "$rel"
         done
@@ -303,7 +310,10 @@ do_sync() {
     log_info "Checking .config/ directories..."
     for dir in "${CONFIG_DIRS[@]}"; do
         if [[ -d "$HOME/.config/$dir" ]]; then
-            find "$HOME/.config/$dir" -type f 2>/dev/null | while read -r sys_file; do
+            find "$HOME/.config/$dir" -type f \
+                ! -path "*/.git/*" ! -path "*/__pycache__/*" ! -name "*.pyc" \
+                ! -path "*/node_modules/*" \
+                2>/dev/null | while read -r sys_file; do
                 local rel="${sys_file#$HOME/}"
                 # Skip cache/log/credential files
                 case "$rel" in
@@ -422,7 +432,9 @@ do_link() {
 
     # .vim directory
     if [[ -d "$DOTDIR/.vim" ]]; then
-        find "$DOTDIR/.vim" -type f 2>/dev/null | while read -r f; do
+        find "$DOTDIR/.vim" -type f \
+            ! -path "*/.git/*" ! -path "*/__pycache__/*" ! -name "*.pyc" \
+            2>/dev/null | while read -r f; do
             local rel="${f#$DOTDIR/}"
             link_file "$rel"
         done
@@ -445,7 +457,10 @@ do_link() {
     log_info "Linking .config/ directories..."
     for dir in "${CONFIG_DIRS[@]}"; do
         if [[ -d "$DOTDIR/.config/$dir" ]]; then
-            find "$DOTDIR/.config/$dir" -type f 2>/dev/null | while read -r f; do
+            find "$DOTDIR/.config/$dir" -type f \
+                ! -path "*/.git/*" ! -path "*/__pycache__/*" ! -name "*.pyc" \
+                ! -path "*/node_modules/*" \
+                2>/dev/null | while read -r f; do
                 local rel="${f#$DOTDIR/}"
                 link_file "$rel"
             done
@@ -508,10 +523,16 @@ do_link() {
         else
             # Backup existing file
             if [[ -f "$sys_path" && ! -L "$sys_path" ]]; then
-                sudo cp "$sys_path" "${sys_path}.bak.$(date +%Y%m%d)"
-                log_info "Backed up: $sys_path → ${sys_path}.bak.$(date +%Y%m%d)"
+                if ! sudo cp "$sys_path" "${sys_path}.bak.$(date +%Y%m%d)" 2>/dev/null; then
+                    log_warn "Could not back up $sys_path (sudo failed)"
+                else
+                    log_info "Backed up: $sys_path → ${sys_path}.bak.$(date +%Y%m%d)"
+                fi
             fi
-            sudo ln -sf "$repo_file" "$sys_path"
+            if ! sudo ln -sf "$repo_file" "$sys_path" 2>/dev/null; then
+                log_skip "$sys_path (sudo failed — skipping)"
+                continue
+            fi
             log_link "$sys_path → $repo_file"
         fi
     done
@@ -532,8 +553,11 @@ do_link() {
         if [[ "$DRY_RUN" == true ]]; then
             log_dry "Would copy (sudo): $repo_file → $sys_path"
         else
-            sudo mkdir -p "$(dirname "$sys_path")"
-            sudo cp "$repo_file" "$sys_path"
+            if ! sudo mkdir -p "$(dirname "$sys_path")" 2>/dev/null \
+               || ! sudo cp "$repo_file" "$sys_path" 2>/dev/null; then
+                log_skip "$sys_path (sudo failed — skipping)"
+                continue
+            fi
             log_info "Copied (boot-critical): $repo_path → $sys_path"
         fi
     done
