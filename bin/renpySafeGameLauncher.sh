@@ -1,6 +1,17 @@
 #!/bin/bash
 xhost +local:*
 
+# --- Defer: reset the display after the game exits -------------------------
+# krkr/wine (and some Ren'Py) games lower the screen resolution (e.g. native
+# 1920x1200 -> 1280x800) and leave it that way. Reset the primary output back
+# to its preferred/native mode on exit, Go-defer style.
+restore_display() {
+	local out
+	out="$(xrandr --query 2>/dev/null | awk '/ connected primary/{print $1; exit}')"
+	[ -n "$out" ] && xrandr --output "$out" --auto 2>/dev/null
+}
+trap restore_display EXIT
+
 # --- Detect game type -----------------------------------------------------
 # Kirikiri (krkr) / .xp3 Japanese visual novels run under Wine with a
 # Japanese locale and a persistent WINEPREFIX. Everything else is Ren'Py.
