@@ -127,15 +127,26 @@ get_packages() {
 }
 
 is_install() {
+    local flags
     for arg in "$@"; do
         case "$arg" in
             -S) return 0 ;;
-            -S[^sicqlduypf]*) return 0 ;;
+            -S*)
+                flags="${arg#-S}"
+                # upgrade / refresh / force → install (e.g. -Su, -Sy, -Syu, -Sf)
+                [[ "$flags" == *[uyf]* ]] && return 0
+                # query/info/clean/list/print/download/groups → not an install
+                [[ "$flags" == *[siclpwg]* ]] && return 1
+                # only modifiers left (-Sq, -Sd, -Sn) → treat as install
+                return 0
+                ;;
+            # Other pacman/yay operations that don't install from AUR
+            -R*|-Q*|-U*|-D*|-F*|-G*|-P*|-Y*) return 1 ;;
         esac
     done
-    local has_flag=false
-    for arg in "$@"; do [[ "$arg" == -* ]] && has_flag=true; done
-    if ! $has_flag && [ $# -gt 0 ]; then return 0; fi
+    # No operation flag at all: bare `yay`, `yay --noconfirm`, `yay --devel`
+    # → defaults to a full upgrade (-Syu), which must be scanned.
+    [ $# -gt 0 ] && return 0
     return 1
 }
 
@@ -737,7 +748,8 @@ validate_package() {
 # RECURSIVE AUR DEPENDENCY RESOLUTION
 # ═══════════════════════════════════════════════════════════════════════════════
 
-declare -A _aur_visited=()
+declare -A _aur_visited=()   # package names already resolved this run (prevents re-clone / cycles)
+declare -A _aur_scanned=()   # package names already validated this run (prevents re-scan)
 declare -a _aur_dep_list=()
 
 resolve_aur_deps_recursive() {
@@ -763,6 +775,40 @@ resolve_aur_deps_recursive() {
     rm -rf "$tmpdir"
 }
 
+# Resolve the full AUR dependency tree for a package, scan every AUR dep, then
+# scan the package itself. Returns non-zero if anything is blocked.
+scan_pkg_with_deps() {
+    local pkg="$1"
+    local dep
+
+    # Already validated earlier this run (as a dep of another package) → skip.
+    [[ -n "${_aur_scanned[$pkg]+x}" ]] && return 0
+
+    echo -e "${CYN}[aur-guard]${RST} Resolving dependency tree for '$pkg'..."
+    _aur_dep_list=()
+    _aur_visited[$pkg]=1
+    resolve_aur_deps_recursive "$pkg"
+
+    if [ ${#_aur_dep_list[@]} -gt 0 ]; then
+        echo -e "${CYN}[aur-guard]${RST} AUR deps: ${_aur_dep_list[*]}"
+        for dep in "${_aur_dep_list[@]}"; do
+            [[ -n "${_aur_scanned[$dep]+x}" ]] && continue
+            if ! validate_package "$dep"; then
+                echo -e "${RED}[aur-guard] ✗ Dependency '$dep' BLOCKED.${RST}"
+                return 1
+            fi
+            _aur_scanned[$dep]=1
+        done
+    fi
+
+    if ! validate_package "$pkg"; then
+        echo -e "${RED}[aur-guard] ✗ '$pkg' BLOCKED.${RST}"
+        return 1
+    fi
+    _aur_scanned[$pkg]=1
+    return 0
+}
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # ENTRY POINT
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -786,8 +832,7 @@ if [ -z "$packages" ]; then
 
     echo -e "${CYN}[aur-guard]${RST} ${#update_pkgs[@]} AUR update(s). Scanning..."
     for pkg in "${update_pkgs[@]}"; do
-        if ! validate_package "$pkg"; then
-            echo -e "${RED}[aur-guard] ✗ '$pkg' BLOCKED.${RST}"
+        if ! scan_pkg_with_deps "$pkg"; then
             exit 1
         fi
     done
@@ -796,24 +841,7 @@ fi
 
 for pkg in $packages; do
     if is_aur_package "$pkg"; then
-        echo -e "${CYN}[aur-guard]${RST} Resolving dependency tree for '$pkg'..."
-        _aur_visited=()
-        _aur_dep_list=()
-        _aur_visited[$pkg]=1
-        resolve_aur_deps_recursive "$pkg"
-
-        if [ ${#_aur_dep_list[@]} -gt 0 ]; then
-            echo -e "${CYN}[aur-guard]${RST} AUR deps: ${_aur_dep_list[*]}"
-            for dep in "${_aur_dep_list[@]}"; do
-                if ! validate_package "$dep"; then
-                    echo -e "${RED}[aur-guard] ✗ Dependency '$dep' BLOCKED.${RST}"
-                    exit 1
-                fi
-            done
-        fi
-
-        if ! validate_package "$pkg"; then
-            echo -e "${RED}[aur-guard] ✗ '$pkg' BLOCKED.${RST}"
+        if ! scan_pkg_with_deps "$pkg"; then
             exit 1
         fi
     else
