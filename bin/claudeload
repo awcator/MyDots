@@ -1,6 +1,6 @@
 #!/bin/bash
 # claudeload — switch Claude Code backend in current shell
-# Usage: source claudeload opus|glm|status
+# Usage: source claudeload opus|glm|deepseek|status
 
 case "${1:-list}" in
   opus)
@@ -21,6 +21,18 @@ case "${1:-list}" in
     export ANTHROPIC_DEFAULT_HAIKU_MODEL=glm-5.2
     [[ -z "$CLAUDELOAD_QUIET" ]] && echo "Loaded: glm-5.2 High (port 4142, WindsurfAPI, 3 credits — run 'claudecredits glm' for live rates)"
     ;;
+  deepseek)
+    unset ANTHROPIC_AUTH_TOKEN
+    export ANTHROPIC_BASE_URL=https://api.deepseek.com/anthropic
+    export ANTHROPIC_API_KEY=KEEY
+    export ANTHROPIC_MODEL="deepseek-v4-pro[1m]"
+    export ANTHROPIC_DEFAULT_OPUS_MODEL="deepseek-v4-pro[1m]"
+    export ANTHROPIC_DEFAULT_SONNET_MODEL="deepseek-v4-pro[1m]"
+    export ANTHROPIC_DEFAULT_HAIKU_MODEL=deepseek-v4-flash
+    export CLAUDE_CODE_SUBAGENT_MODEL=deepseek-v4-flash
+    export CLAUDE_CODE_EFFORT_LEVEL=low
+    [[ -z "$CLAUDELOAD_QUIET" ]] && echo "Loaded: deepseek-v4-pro[1m] (api.deepseek.com)"
+    ;;
   status|s)
     echo "ANTHROPIC_BASE_URL=$ANTHROPIC_BASE_URL"
     echo "ANTHROPIC_MODEL=$ANTHROPIC_MODEL"
@@ -29,9 +41,10 @@ case "${1:-list}" in
   *)
     echo "claudeload — switch Claude Code backend"
     echo ""
-    echo "  opus    claude-opus-4.6  port 4141  4.8 credits (live)"
-    echo "  glm     glm-5.2 High     port 4142  3 credits (live)"
-    echo "  status  show current config"
+    echo "  opus     claude-opus-4.6  port 4141  4.8 credits (live)"
+    echo "  glm      glm-5.2 High     port 4142  3 credits (live)"
+    echo "  deepseek deepseek-v4-pro[1m]  (api.deepseek.com)"
+    echo "  status   show current config"
     echo "  credits run 'claudecredits' to pull live rates from upstream"
     echo ""
     echo "Usage: source claudeload <profile>"

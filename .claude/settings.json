@@ -35,11 +35,36 @@
             "type": "command",
             "command": "notify-send -t 5000 'Claude Code' 'Claude Code needs your attention'",
             "timeout": 5
+          },
+          {
+            "type": "command",
+            "command": "/home/awcator/Documents/whatapp/mcp/notify-whatsapp.sh",
+            "timeout": 30
+          }
+        ]
+      },
+      {
+        "matcher": "idle_prompt",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/home/awcator/Documents/whatapp/mcp/idle-reminder.sh",
+            "timeout": 15
           }
         ]
       }
     ],
     "PostToolUse": [
+      {
+        "matcher": "ScheduleWakeup|CronCreate",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash /home/awcator/Documents/whatapp/mcp/notify-loop.sh",
+            "timeout": 30
+          }
+        ]
+      },
       {
         "matcher": "Write|Edit",
         "hooks": [
@@ -88,6 +113,28 @@
           }
         ]
       }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/home/awcator/Documents/whatapp/mcp/idle-reminder.sh --stop",
+            "timeout": 15
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/home/awcator/Documents/whatapp/mcp/idle-reminder.sh --stop",
+            "timeout": 15
+          }
+        ]
+      }
     ]
   },
   "statusLine": {
@@ -96,11 +143,11 @@
     "padding": 2
   },
   "enabledPlugins": {},
+  "effortLevel": "medium",
   "awaySummaryEnabled": true,
   "tui": "fullscreen",
   "skipDangerousModePermissionPrompt": true,
   "verbose": true,
   "autoCompactEnabled": true,
-  "skipAutoPermissionPrompt": true,
-  "effortLevel": "low"
+  "skipAutoPermissionPrompt": true
 }
