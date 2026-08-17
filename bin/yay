@@ -617,14 +617,20 @@ Focus on: source authenticity, build process sanity, privilege usage, persistenc
     echo -e "${CYN}╰───────────────────────────────────────────────────────────────╯${RST}" >&2
     echo "" >&2
 
-    # Extract verdict
-    if echo "$result" | grep -qi "VERDICT.*DANGEROUS\|DANGEROUS.*VERDICT"; then
-        echo "DANGEROUS"
-    elif echo "$result" | grep -qi "VERDICT.*SUSPICIOUS\|SUSPICIOUS.*VERDICT"; then
-        echo "SUSPICIOUS"
-    else
-        echo "SAFE"
-    fi
+    # Extract verdict — only look at the line(s) immediately after the VERDICT
+    # heading, never the free-form REASONING prose (which will mention
+    # "suspicious"/"verdict" colloquially and would trigger a false positive).
+    local verdict_word
+    verdict_word=$(echo "$result" \
+        | grep -iE '^\s*##?\s*[0-9]*\.?\s*VERDICT' -A3 \
+        | grep -oiE '\b(SAFE|SUSPICIOUS|DANGEROUS)\b' \
+        | head -1)
+
+    case "$verdict_word" in
+        DANGEROUS)   echo "DANGEROUS" ;;
+        SUSPICIOUS)  echo "SUSPICIOUS" ;;
+        *)           echo "SAFE" ;;
+    esac
 }
 
 # ═══════════════════════════════════════════════════════════════════════════════
