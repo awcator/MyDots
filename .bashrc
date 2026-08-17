@@ -128,9 +128,9 @@ eval "$(pyenv init - bash)"
 
 # --- OTP secrets (not in repo) ---
 [[ -f "$HOME/.otp_secrets" ]] && source "$HOME/.otp_secrets"
-# --- Claude Code backend (switch with: source claudeload opus|glm) ---
-CLAUDELOAD_QUIET=1 source claudeload opus 2>/dev/null
 
+# claudeload as a plain command — sources the script so its env vars persist here
+claudeload() { source "$HOME/Documents/MyDots/bin/claudeload" "$@"; }
 
 # HSTR configuration (history size managed above - keep unlimited)
 alias hh=hstr

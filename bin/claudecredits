@@ -69,6 +69,7 @@ import { fetchCatalog, fetchUserStatus } from './src/devin-connect-catalog.js';
 
 const token = process.argv[1];
 const filter = process.argv[2] || '';
+const raw = filter === '--raw';
 
 // Build a label lookup from catalog
 const catalog = await fetchCatalog({ token });
@@ -89,10 +90,15 @@ if (!status.rateTable || typeof status.rateTable !== 'object') {
 
 // Normalize: treat . and - as interchangeable so '4.6' matches '4-6'
 const norm = str => (str || '').toLowerCase().replace(/[.\s]/g, '-');
-const f = norm(filter);
+const f = norm(raw ? '' : filter);
 const entries = Object.entries(status.rateTable)
   .filter(([s]) => !filter || norm(s).includes(f) || norm(labelMap[s]).includes(f))
   .sort((a,b) => a[1]-b[1]);
+
+if (raw) {
+  for (const [sel, rate] of entries) console.log(sel + '\t' + rate + '\t' + (labelMap[sel] || ''));
+  process.exit(0);
+}
 
 // Column widths
 const maxSel = Math.max(...entries.map(e => e[0].length), 20);
