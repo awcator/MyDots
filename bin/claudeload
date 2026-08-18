@@ -238,13 +238,13 @@ gpt-5.6-luna'
     ;;
   antigravity|ag)
     _clear_anthropic
-    export ANTHROPIC_BASE_URL=http://localhost:8080
+    export ANTHROPIC_BASE_URL=http://localhost:9080
     export ANTHROPIC_AUTH_TOKEN=test
-    _spawn_proxy antigravity 8080 acc start --log
+    _spawn_proxy antigravity 9080 env PORT=9080 acc start --log
 
     # Fetch the live model list + account state from the API (nothing hardcoded)
-    _ag_models_json="$(curl -sf http://localhost:8080/v1/models 2>/dev/null)"
-    _ag_accounts_json="$(curl -sf http://localhost:8080/api/accounts 2>/dev/null)"
+    _ag_models_json="$(curl -sf http://localhost:9080/v1/models 2>/dev/null)"
+    _ag_accounts_json="$(curl -sf http://localhost:9080/api/accounts 2>/dev/null)"
     if [[ -z "$_ag_models_json" ]]; then
       echo "antigravity: couldn't fetch models from $ANTHROPIC_BASE_URL (is the proxy + account working?)" >&2
       return 1 2>/dev/null || exit 1
@@ -292,7 +292,7 @@ print("  accounts: %d/%d available, %d rate-limited" % (s.get("available",0), s.
 '
       fi
 
-      _ag_base="$(_pick "Antigravity models (:8080)" "$_ag_tsv")" \
+      _ag_base="$(_pick "Antigravity models (:9080)" "$_ag_tsv")" \
         || { echo "  cancelled" >&2; return 1 2>/dev/null || exit 1; }
     fi
 
@@ -312,7 +312,7 @@ print("  accounts: %d/%d available, %d rate-limited" % (s.get("available",0), s.
     export ANTHROPIC_SMALL_FAST_MODEL="$_ag_fast"
     export CLAUDE_CODE_SUBAGENT_MODEL="$_ag_fast"
     unset _ag_base _ag_fast _ag_all _ag_tsv _ag_models_json _ag_accounts_json
-    [[ -z "$CLAUDELOAD_QUIET" ]] && echo "Loaded: $ANTHROPIC_MODEL (antigravity, :8080) — fast/subagent: $ANTHROPIC_SMALL_FAST_MODEL"
+    [[ -z "$CLAUDELOAD_QUIET" ]] && echo "Loaded: $ANTHROPIC_MODEL (antigravity, :9080) — fast/subagent: $ANTHROPIC_SMALL_FAST_MODEL"
     ;;
   status|s)
     echo "ANTHROPIC_BASE_URL=$ANTHROPIC_BASE_URL"
