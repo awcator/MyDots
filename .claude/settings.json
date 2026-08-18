@@ -149,5 +149,6 @@
   "skipDangerousModePermissionPrompt": true,
   "verbose": true,
   "autoCompactEnabled": true,
-  "skipAutoPermissionPrompt": true
+  "skipAutoPermissionPrompt": true,
+  "model": "haiku"
 }
