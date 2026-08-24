@@ -157,7 +157,7 @@ gpt-5.6-luna'
         _cp_fast="$(printf '%s\n' $_cp_all | \grep '^claude-haiku' | sort -V | tail -1)"
         ;;
       gpt-*)
-        _cp_sonnet="$(printf '%s\n' $_cp_all | \grep -E '^gpt-5' | grep -v mini | sort -V | tail -1)"
+        _cp_sonnet="$(printf '%s\n' $_cp_all | \grep -E '^gpt-5' | \grep -v mini | sort -V | tail -1)"
         _cp_fast="$(printf '%s\n' $_cp_all | \grep -E 'gpt-4o-mini|gpt-4\.1|gpt-4-mini' | sort -V | tail -1)"
         ;;
       *) _cp_sonnet="$_cp_base"; _cp_fast="$_cp_base" ;;
@@ -300,7 +300,7 @@ print("  accounts: %d/%d available, %d rate-limited" % (s.get("available",0), s.
     if [[ "$_ag_base" == *claude* ]]; then
       _ag_fast="$(printf '%s\n' $_ag_all | \grep -E '^claude.*(sonnet|haiku)' | sort -V | tail -1)"
     else
-      _ag_fast="$(printf '%s\n' $_ag_all | \grep -E '^gemini' | grep -i 'flash' \
+      _ag_fast="$(printf '%s\n' $_ag_all | \grep -E '^gemini' | \grep -i 'flash' \
         | \grep -viE 'high|pro|thinking|image|agent|medium|tiered' | sort -V | tail -1)"
     fi
     [[ -z "$_ag_fast" ]] && _ag_fast="$_ag_base"

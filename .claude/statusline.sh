@@ -12,12 +12,14 @@ INPUT=$(cat)
 MODEL=$(echo "$INPUT"       | jq -r '.model.display_name // "Unknown"')
 CWD=$(echo "$INPUT"         | jq -r '.cwd // ""')
 CTX_USED=$(echo "$INPUT"    | jq -r '.context_window.used_percentage // 0')
-COST=$(echo "$INPUT"        | jq -r '.session.cost_usd // 0')
-DURATION=$(echo "$INPUT"    | jq -r '.session.duration_ms // 0')
+COST=$(echo "$INPUT"        | jq -r '.cost.total_cost_usd // 0')
+DURATION=$(echo "$INPUT"    | jq -r '.cost.total_duration_ms // 0')
 TURNS=$(echo "$INPUT"       | jq -r '.session.turns // 0')
 ACTIVE=$(echo "$INPUT"      | jq -r '.session.is_active // false')
 VIM_MODE=$(echo "$INPUT"    | jq -r '.vim_mode // ""')
 WORKTREE=$(echo "$INPUT"    | jq -r '.worktree.is_active // false')
+VERSION=$(echo "$INPUT"     | jq -r '.version // ""')
+SESSION_ID=$(echo "$INPUT"  | jq -r '.session_id // ""')
 
 # ── Colors (TrueColor ANSI) ──────────────────────────────────────
 RST='\033[0m'
@@ -35,13 +37,11 @@ C_ORANGE='\033[38;2;255;170;80m'       # peach
 C_RED='\033[38;2;255;110;110m'         # coral
 C_PINK='\033[38;2;255;140;200m'        # pink
 C_GRAY='\033[38;2;120;120;140m'        # muted gray
-C_WHITE='\033[38;2;220;220;230m'       # soft white
-C_BG_BAR='\033[48;2;40;40;55m'         # dark bar background
 
 # ── Nerd Font Icons ───────────────────────────────────────────────
 ICON_MODEL="󰧑"        # brain / AI
 ICON_FOLDER=""        # folder
-ICON_GIT=""          # git branch
+ICON_GIT="󰘬"         # git branch
 ICON_CLOCK=""        # clock
 ICON_DOLLAR="󰄛"       # dollar
 ICON_TURNS="󰑐"        # cycle/turns
@@ -49,15 +49,18 @@ ICON_CTX="󰍛"          # memory/context
 ICON_VIM=""          # vim
 ICON_TREE=""         # tree/worktree
 ICON_ACTIVE="●"        # active indicator
-ICON_SEP=""          # powerline separator
-ICON_SEP_THIN=""     # thin separator
+ICON_SEP_THIN="|"    # thin separator
+ICON_CRON="⏱"         # cron/timer
+ICON_TASK="⚡"         # active tasks
 
 # ── Cached Git Info (cache for 10 seconds) ────────────────────────
 GIT_CACHE="/tmp/.claude-statusline-git-$$"
 GIT_INFO=""
+GIT_DIFF=""
 if [ -n "$CWD" ] && [ -d "$CWD" ]; then
     if [ -f "$GIT_CACHE" ] && [ "$(( $(date +%s) - $(stat -c %Y "$GIT_CACHE" 2>/dev/null || echo 0) ))" -lt 10 ]; then
-        GIT_INFO=$(cat "$GIT_CACHE" 2>/dev/null || true)
+        read -r GIT_INFO < "$GIT_CACHE" || true
+        GIT_DIFF=$(sed -n '2p' "$GIT_CACHE" 2>/dev/null || true)
     else
         GIT_BRANCH=$(git -C "$CWD" symbolic-ref --short HEAD 2>/dev/null || git -C "$CWD" rev-parse --short HEAD 2>/dev/null || echo "")
         if [ -n "$GIT_BRANCH" ]; then
@@ -67,8 +70,57 @@ if [ -n "$CWD" ] && [ -d "$CWD" ]; then
             else
                 GIT_INFO="${GIT_BRANCH}"
             fi
+
+            # Diff stats (+X -Y)
+            GIT_STATS=$(git -C "$CWD" diff --shortstat 2>/dev/null || echo "")
+            if [ -n "$GIT_STATS" ]; then
+                INS=$(echo "$GIT_STATS" | grep -oP '\d+(?=\s*insertion)' || echo 0)
+                DEL=$(echo "$GIT_STATS" | grep -oP '\d+(?=\s*deletion)' || echo 0)
+                if [ -z "$INS" ] || [ "$INS" = "0" ]; then INS=$(echo "$GIT_STATS" | awk '{for(i=1;i<=NF;i++) if($i~/insertion/) print $(i-1)}' || echo 0); fi
+                if [ -z "$DEL" ] || [ "$DEL" = "0" ]; then DEL=$(echo "$GIT_STATS" | awk '{for(i=1;i<=NF;i++) if($i~/deletion/) print $(i-1)}' || echo 0); fi
+
+                [ "${INS:-0}" -gt 0 ] && GIT_DIFF+="${C_GREEN}+${INS}${RST} "
+                [ "${DEL:-0}" -gt 0 ] && GIT_DIFF+="${C_RED}-${DEL}${RST} "
+                GIT_DIFF=$(echo -e "$GIT_DIFF" | sed 's/ $//')
+            fi
         fi
         echo "$GIT_INFO" > "$GIT_CACHE" 2>/dev/null || true
+        echo -E "$GIT_DIFF" >> "$GIT_CACHE" 2>/dev/null || true
+    fi
+fi
+
+# ── Version Update Check (cache for 1 hour) ────────────────────────
+VERSION_CACHE="/tmp/.claude-statusline-version-$$"
+UPDATE_INFO=""
+if [ -n "$VERSION" ]; then
+    if [ -f "$VERSION_CACHE" ] && [ "$(( $(date +%s) - $(stat -c %Y "$VERSION_CACHE" 2>/dev/null || echo 0) ))" -lt 3600 ]; then
+        LATEST_VERSION=$(cat "$VERSION_CACHE" 2>/dev/null || true)
+    else
+        # Run npm check in the background so it doesn't block the UI
+        (npm view @anthropic-ai/claude-code version > "$VERSION_CACHE" 2>/dev/null) &
+        LATEST_VERSION=$(cat "$VERSION_CACHE" 2>/dev/null || true)
+    fi
+    if [ -n "$LATEST_VERSION" ] && [ "$LATEST_VERSION" != "$VERSION" ]; then
+        UPDATE_INFO=" 🔄 ${C_GREEN}v${LATEST_VERSION}${RST}"
+    fi
+fi
+
+# ── Active Crons ─────────────────────────────────────────────────
+CRONS_COUNT=0
+if [ -n "$CWD" ] && [ -f "$CWD/.claude/scheduled_tasks.json" ]; then
+    CRONS=$(cat "$CWD/.claude/scheduled_tasks.json" 2>/dev/null || echo "{}")
+    if [ "$CRONS" != "{}" ] && [ "$CRONS" != "[]" ] && [ "$CRONS" != "" ]; then
+        CRONS_COUNT=$(echo "$CRONS" | jq '.tasks | length' 2>/dev/null || echo 0)
+    fi
+fi
+
+# ── Active Tasks (Subagents) ─────────────────────────────────────
+TASKS_COUNT=0
+if [ -n "$SESSION_ID" ]; then
+    # Find the tasks directory for this session
+    TASK_DIR=$(find /tmp/claude-$(id -u) -type d -name "$SESSION_ID" 2>/dev/null | head -n 1)
+    if [ -n "$TASK_DIR" ] && [ -d "$TASK_DIR/tasks" ]; then
+        TASKS_COUNT=$(ls -1 "$TASK_DIR/tasks"/*.output 2>/dev/null | wc -l || echo 0)
     fi
 fi
 
@@ -88,7 +140,6 @@ format_duration() {
 # ── Format cost ──────────────────────────────────────────────────
 format_cost() {
     local cost=$1
-    # Use awk for float formatting
     echo "$cost" | awk '{
         if ($1 < 0.01) printf "%.4f", $1
         else if ($1 < 1) printf "%.3f", $1
@@ -105,14 +156,10 @@ make_ctx_bar() {
     local bar=""
     local color
 
-    if [ "$pct" -lt 50 ]; then
-        color="$C_GREEN"
-    elif [ "$pct" -lt 75 ]; then
-        color="$C_YELLOW"
-    elif [ "$pct" -lt 90 ]; then
-        color="$C_ORANGE"
-    else
-        color="$C_RED"
+    if [ "$pct" -lt 50 ]; then color="$C_GREEN"
+    elif [ "$pct" -lt 75 ]; then color="$C_YELLOW"
+    elif [ "$pct" -lt 90 ]; then color="$C_ORANGE"
+    else color="$C_RED"
     fi
 
     bar="${color}"
@@ -131,10 +178,10 @@ else
     STATUS_DOT="${C_GRAY}${DIM}${ICON_ACTIVE}${RST}"
 fi
 
-# ── Build Line 1: Model + Project + Git ──────────────────────────
+# ── Build Line 1: Model + Version + Project + Git ────────────────
 PROJECT_NAME=""
 if [ -n "$CWD" ]; then
-    PROJECT_NAME=$(basename "$CWD")
+    PROJECT_NAME="$CWD"
 fi
 
 LINE1=""
@@ -145,6 +192,11 @@ LINE1+="${STATUS_DOT} "
 # Model badge
 LINE1+="${C_PURPLE}${BOLD}${ICON_MODEL} ${MODEL}${RST}"
 
+# Version and Update Check
+if [ -n "$VERSION" ]; then
+    LINE1+=" ${C_GRAY}v${VERSION}${RST}${UPDATE_INFO}"
+fi
+
 # Separator
 LINE1+=" ${C_GRAY}${ICON_SEP_THIN}${RST} "
 
@@ -153,10 +205,13 @@ if [ -n "$PROJECT_NAME" ]; then
     LINE1+="${C_BLUE}${ICON_FOLDER} ${PROJECT_NAME}${RST}"
 fi
 
-# Git branch
+# Git branch & diff stats
 if [ -n "$GIT_INFO" ]; then
     LINE1+=" ${C_GRAY}${ICON_SEP_THIN}${RST} "
     LINE1+="${C_ORANGE}${ICON_GIT} ${GIT_INFO}${RST}"
+    if [ -n "$GIT_DIFF" ]; then
+        LINE1+=" [${GIT_DIFF}]"
+    fi
 fi
 
 # Worktree indicator
@@ -175,7 +230,7 @@ if [ -n "$VIM_MODE" ] && [ "$VIM_MODE" != "null" ]; then
     esac
 fi
 
-# ── Build Line 2: Context + Cost + Duration + Turns ──────────────
+# ── Build Line 2: Context + Cost + Duration + Turns + Tasks ──────
 LINE2=""
 
 # Context bar
@@ -197,11 +252,24 @@ LINE2+=" ${C_GRAY}${ICON_SEP_THIN}${RST} "
 DUR_FMT=$(format_duration "$DURATION")
 LINE2+="${C_YELLOW}${ICON_CLOCK} ${DUR_FMT}${RST}"
 
-# Separator
-LINE2+=" ${C_GRAY}${ICON_SEP_THIN}${RST} "
+# Turns (only if present)
+if [ "$TURNS" != "0" ] && [ -n "$TURNS" ]; then
+    LINE2+=" ${C_GRAY}${ICON_SEP_THIN}${RST} "
+    LINE2+="${C_PINK}${ICON_TURNS} ${TURNS}${RST}"
+fi
 
-# Turns
-LINE2+="${C_PINK}${ICON_TURNS} ${TURNS}${RST}"
+# Crons and Tasks
+if [ "$CRONS_COUNT" -gt 0 ] || [ "$TASKS_COUNT" -gt 0 ]; then
+    LINE2+=" ${C_GRAY}${ICON_SEP_THIN}${RST} "
+
+    if [ "$CRONS_COUNT" -gt 0 ]; then
+        LINE2+="${C_ORANGE}${ICON_CRON} ${CRONS_COUNT}${RST} "
+    fi
+
+    if [ "$TASKS_COUNT" -gt 0 ]; then
+        LINE2+="${C_BLUE}${ICON_TASK} ${TASKS_COUNT}${RST}"
+    fi
+fi
 
 # ── Output ────────────────────────────────────────────────────────
 echo -e "$LINE1"
