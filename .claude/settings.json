@@ -150,5 +150,5 @@
   "verbose": true,
   "autoCompactEnabled": true,
   "skipAutoPermissionPrompt": true,
-  "model": "haiku"
+  "model": "opus"
 }
