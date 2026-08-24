@@ -19,7 +19,7 @@ _clear_anthropic() {
 # ── foreground proxy management (tmux) ────────────────────────────────────
 # _proxy_port_up <port> → 0 if something is already listening there
 _proxy_port_up() {
-  ss -ltn 2>/dev/null | awk '{print $4}' | grep -qE "(^|:)$1$" && return 0
+  ss -ltn 2>/dev/null | awk '{print $4}' | \grep -qE "(^|:)$1$" && return 0
   curl -sf -o /dev/null --max-time 1 "http://localhost:$1/v1/models" 2>/dev/null && return 0
   return 1
 }
@@ -47,7 +47,7 @@ _spawn_proxy() {
   # Wait for the port to come up (up to ~30s)
   local _i
   for _i in {1..30}; do
-    ss -ltn 2>/dev/null | awk '{print $4}' | grep -qE "(^|:)$_port$" && return 0
+    ss -ltn 2>/dev/null | awk '{print $4}' | \grep -qE "(^|:)$_port$" && return 0
     sleep 1
   done
   [[ -z "$CLAUDELOAD_QUIET" ]] && echo "$_name: warning — :$_port not up after 30s" >&2
@@ -124,7 +124,7 @@ case "${1:-}" in
 
     # Live model list (fall back to a known-good curated list)
     _cp_all="$(curl -sf http://localhost:4141/v1/models 2>/dev/null \
-      | grep -o '"id":"[^"]*"' | cut -d'"' -f4 | sort -u -V)"
+      | \grep -o '"id":"[^"]*"' | cut -d'"' -f4 | sort -u -V)"
     if [[ -z "$_cp_all" ]]; then
       _cp_all='claude-opus-5
 claude-opus-4.8
@@ -153,12 +153,12 @@ gpt-5.6-luna'
 
     case "$_cp_base" in
       claude-*)
-        _cp_sonnet="$(printf '%s\n' $_cp_all | grep '^claude-sonnet' | sort -V | tail -1)"
-        _cp_fast="$(printf '%s\n' $_cp_all | grep '^claude-haiku' | sort -V | tail -1)"
+        _cp_sonnet="$(printf '%s\n' $_cp_all | \grep '^claude-sonnet' | sort -V | tail -1)"
+        _cp_fast="$(printf '%s\n' $_cp_all | \grep '^claude-haiku' | sort -V | tail -1)"
         ;;
       gpt-*)
-        _cp_sonnet="$(printf '%s\n' $_cp_all | grep -E '^gpt-5' | grep -v mini | sort -V | tail -1)"
-        _cp_fast="$(printf '%s\n' $_cp_all | grep -E 'gpt-4o-mini|gpt-4\.1|gpt-4-mini' | sort -V | tail -1)"
+        _cp_sonnet="$(printf '%s\n' $_cp_all | \grep -E '^gpt-5' | grep -v mini | sort -V | tail -1)"
+        _cp_fast="$(printf '%s\n' $_cp_all | \grep -E 'gpt-4o-mini|gpt-4\.1|gpt-4-mini' | sort -V | tail -1)"
         ;;
       *) _cp_sonnet="$_cp_base"; _cp_fast="$_cp_base" ;;
     esac
@@ -191,7 +191,7 @@ gpt-5.6-luna'
 
     _ws_base="${2:-}"
     if [[ -z "$_ws_base" ]]; then
-      mapfile -t _ws_models < <(claudecredits --raw 2>/dev/null | grep $'\t' | cut -f1)
+      mapfile -t _ws_models < <(claudecredits --raw 2>/dev/null | \grep $'\t' | cut -f1)
       if [[ ${#_ws_models[@]} -eq 0 ]]; then
         echo "windsurf: couldn't fetch model catalog" >&2
         return 1 2>/dev/null || exit 1
@@ -205,7 +205,7 @@ gpt-5.6-luna'
 
     # Derive cheapest same-family model for the haiku/mini/subagent slot
     _ws_vendor="$(_vendor_of "$_ws_base")"
-    _ws_fast="$(claudecredits --raw 2>/dev/null | grep $'\t' | awk -F'\t' -v v="$_ws_vendor" \
+    _ws_fast="$(claudecredits --raw 2>/dev/null | \grep $'\t' | awk -F'\t' -v v="$_ws_vendor" \
       'index(tolower($1), v) > 0 { print $2 "\t" $1 }' | sort -n | head -1 | cut -f2-)"
     [[ -z "$_ws_fast" ]] && _ws_fast="$_ws_base"
 
@@ -231,7 +231,7 @@ gpt-5.6-luna'
     # Remaining API balance (USD)
     _ds_bal="$(curl -sf https://api.deepseek.com/user/balance \
       -H "Authorization: Bearer $ANTHROPIC_API_KEY" 2>/dev/null \
-      | grep -o '"total_balance":"[^"]*"' | cut -d'"' -f4)"
+      | \grep -o '"total_balance":"[^"]*"' | cut -d'"' -f4)"
     [[ -z "$CLAUDELOAD_QUIET" && -n "$_ds_bal" ]] && echo "Balance: \$$_ds_bal (deepseek)"
     [[ -z "$CLAUDELOAD_QUIET" ]] && echo "Loaded: deepseek-v4-pro[1m] (api.deepseek.com)"
     unset _ds_bal
@@ -251,7 +251,7 @@ gpt-5.6-luna'
     fi
 
     # space-separated id list (used for fast/subagent derivation below)
-    _ag_all="$(printf '%s' "$_ag_models_json" | grep -o '"id":"[^"]*"' | cut -d'"' -f4 | sort -u -V)"
+    _ag_all="$(printf '%s' "$_ag_models_json" | \grep -o '"id":"[^"]*"' | cut -d'"' -f4 | sort -u -V)"
 
     _ag_base="${2:-}"
     if [[ -z "$_ag_base" ]]; then
@@ -298,10 +298,10 @@ print("  accounts: %d/%d available, %d rate-limited" % (s.get("available",0), s.
 
     # Derive fast/subagent companion (same family, lightest tier)
     if [[ "$_ag_base" == *claude* ]]; then
-      _ag_fast="$(printf '%s\n' $_ag_all | grep -E '^claude.*(sonnet|haiku)' | sort -V | tail -1)"
+      _ag_fast="$(printf '%s\n' $_ag_all | \grep -E '^claude.*(sonnet|haiku)' | sort -V | tail -1)"
     else
-      _ag_fast="$(printf '%s\n' $_ag_all | grep -E '^gemini' | grep -i 'flash' \
-        | grep -viE 'high|pro|thinking|image|agent|medium|tiered' | sort -V | tail -1)"
+      _ag_fast="$(printf '%s\n' $_ag_all | \grep -E '^gemini' | grep -i 'flash' \
+        | \grep -viE 'high|pro|thinking|image|agent|medium|tiered' | sort -V | tail -1)"
     fi
     [[ -z "$_ag_fast" ]] && _ag_fast="$_ag_base"
 

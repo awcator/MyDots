@@ -150,3 +150,11 @@ export PATH="${SONAR_SCANNER_HOME}/bin:${PATH}"
 # Added by Antigravity CLI installer
 export PATH="/home/awcator/.local/bin:$PATH"
 export PATH="$HOME/flutter/bin:$PATH"
+
+# >>> Claude Code Router CLI >>>
+# Added by Claude Code Router. Enables the ccr-app command in new shells.
+case ":$PATH:" in
+  *":$HOME/.claude-code-router/bin:"*) ;;
+  *) export PATH="$HOME/.claude-code-router/bin:$PATH" ;;
+esac
+# <<< Claude Code Router CLI <<<
