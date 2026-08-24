@@ -1,6 +1,7 @@
 [core]
 	autocrlf = input
 	excludesfile = /home/awcator/.gitignore_global
+	pager = delta
 [credential]
 	helper = store
 [user]
@@ -17,3 +18,16 @@
 	rebase = false
 [push]
 	autoSetupRemote = true
+[interactive]
+	diffFilter = delta --color-only
+[delta]
+	navigate = true
+	dark = true
+	line-numbers = true
+	side-by-side = true
+	keep-plus-minus-markers = true
+	syntax-theme = Dracula
+[merge]
+	conflictStyle = zdiff3
+[alias]
+	prdiff = diff master...HEAD
