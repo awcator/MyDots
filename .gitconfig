@@ -27,6 +27,10 @@
 	side-by-side = true
 	keep-plus-minus-markers = true
 	syntax-theme = Dracula
+	wrap-max-lines = unlimited
+	wrap-left-symbol = " "
+	wrap-right-symbol = " "
+	wrap-right-prefix-symbol = " "
 [merge]
 	conflictStyle = zdiff3
 [alias]
