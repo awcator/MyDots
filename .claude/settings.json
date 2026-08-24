@@ -3,8 +3,8 @@
     "PLAYWRIGHT_MCP_EXECUTABLE_PATH": "/sbin/brave",
     "PLAYWRIGHT_MCP_NO_SANDBOX": "1",
     "PLAYWRIGHT_MCP_SHARED_BROWSER_CONTEXT": "1",
-    "PLAYWRIGHT_MCP_USER_DATA_DIR": "/home/awcator/.config/BraveSoftware/Brave-Browser",
-    "SUDO_ASKPASS": "/home/awcator/.local/bin/claude-askpass",
+    "PLAYWRIGHT_MCP_USER_DATA_DIR": "~/.config/BraveSoftware/Brave-Browser",
+    "SUDO_ASKPASS": "~/.local/bin/claude-askpass",
     "TMUX_TMPDIR": "/var/tmp"
   },
   "permissions": {
@@ -26,6 +26,7 @@
     ],
     "defaultMode": "bypassPermissions"
   },
+  "model": "haiku",
   "hooks": {
     "Notification": [
       {
@@ -38,7 +39,7 @@
           },
           {
             "type": "command",
-            "command": "/home/awcator/Documents/whatapp/mcp/notify-whatsapp.sh",
+            "command": "~/.claude/mcp-servers/whatapp/mcp/notify-whatsapp.sh",
             "timeout": 30
           }
         ]
@@ -48,7 +49,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/home/awcator/Documents/whatapp/mcp/idle-reminder.sh",
+            "command": "~/.claude/mcp-servers/whatapp/mcp/idle-reminder.sh",
             "timeout": 15
           }
         ]
@@ -60,7 +61,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash /home/awcator/Documents/whatapp/mcp/notify-loop.sh",
+            "command": "bash ~/.claude/mcp-servers/whatapp/mcp/notify-loop.sh",
             "timeout": 30
           }
         ]
@@ -80,7 +81,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash /home/awcator/.claude/claude-mirror.sh",
+            "command": "bash ~/.claude/claude-mirror.sh",
             "timeout": 10
           }
         ]
@@ -92,7 +93,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "jq -r '.tool_input.command // empty' | { read -r cmd; [ -n \"$cmd\" ] && echo \"$cmd\" >> /home/awcator/.bash_history; }",
+            "command": "jq -r '.tool_input.command // empty' | { read -r cmd; [ -n \"$cmd\" ] && echo \"$cmd\" >> ~/.bash_history; }",
             "timeout": 5
           },
           {
@@ -119,7 +120,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/home/awcator/Documents/whatapp/mcp/idle-reminder.sh --stop",
+            "command": "~/.claude/mcp-servers/whatapp/mcp/idle-reminder.sh --stop",
             "timeout": 15
           }
         ]
@@ -130,7 +131,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/home/awcator/Documents/whatapp/mcp/idle-reminder.sh --stop",
+            "command": "~/.claude/mcp-servers/whatapp/mcp/idle-reminder.sh --stop",
             "timeout": 15
           }
         ]
@@ -139,7 +140,7 @@
   },
   "statusLine": {
     "type": "command",
-    "command": "/home/awcator/.claude/statusline.sh",
+    "command": "~/.claude/statusline.sh",
     "padding": 2
   },
   "enabledPlugins": {},
@@ -149,6 +150,5 @@
   "skipDangerousModePermissionPrompt": true,
   "verbose": true,
   "autoCompactEnabled": true,
-  "skipAutoPermissionPrompt": true,
-  "model": "opus"
+  "skipAutoPermissionPrompt": true
 }

@@ -1,0 +1,11 @@
+# Compiled binary
+/wa
+/mcp/wa-mcp
+
+# WhatsApp session — contains credentials, never commit
+whatsapp.db
+whatsapp.db-shm
+whatsapp.db-wal
+
+# Scratch files
+login_output.txt
