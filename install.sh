@@ -95,6 +95,7 @@ ETC_FILES=(
 # needed before /home is mounted (boot-critical: grub, initramfs, modprobe, udev)
 # Format: "repo_path:system_path"
 ETC_COPY_FILES=(
+    "etc/pam.d/login:/etc/pam.d/login"
     "etc/modprobe.d/nvidia.conf:/etc/modprobe.d/nvidia.conf"
     "etc/modprobe.d/blacklist-nouveau.conf:/etc/modprobe.d/blacklist-nouveau.conf"
     "etc/mkinitcpio.conf:/etc/mkinitcpio.conf"
