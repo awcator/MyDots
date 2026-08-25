@@ -82,19 +82,19 @@ CLAUDE_FILES=(
     claude-mirror.sh
 )
 
-# System config files (/etc/) — require sudo to symlink
-# Format: "repo_path:system_path"
+# System config files (/etc/) that should ideally be managed,
+# but are currently commented out because system files MUST be copied, not symlinked.
+# We moved these to ETC_COPY_FILES below to prevent privilege escalation vulnerabilities.
 ETC_FILES=(
+)
+
+# System config files that must be COPIED (not symlinked)
+# Format: "repo_path:system_path"
+ETC_COPY_FILES=(
     "etc/clamav/clamd.conf:/etc/clamav/clamd.conf"
     "etc/pacman.conf:/etc/pacman.conf"
     "etc/systemd/system/clamav-clamonacc.service.d/override.conf:/etc/systemd/system/clamav-clamonacc.service.d/override.conf"
     "bin/send_virus_alert.sh:/opt/send_virus_alert_sms.sh"
-)
-
-# System config files that must be COPIED (not symlinked) because they are
-# needed before /home is mounted (boot-critical: grub, initramfs, modprobe, udev)
-# Format: "repo_path:system_path"
-ETC_COPY_FILES=(
     "etc/pam.d/login:/etc/pam.d/login"
     "etc/modprobe.d/nvidia.conf:/etc/modprobe.d/nvidia.conf"
     "etc/modprobe.d/blacklist-nouveau.conf:/etc/modprobe.d/blacklist-nouveau.conf"
