@@ -4,7 +4,6 @@
     "PLAYWRIGHT_MCP_NO_SANDBOX": "1",
     "PLAYWRIGHT_MCP_SHARED_BROWSER_CONTEXT": "1",
     "PLAYWRIGHT_MCP_USER_DATA_DIR": "~/.config/BraveSoftware/Brave-Browser",
-    "SUDO_ASKPASS": "~/.local/bin/claude-askpass",
     "TMUX_TMPDIR": "/var/tmp"
   },
   "permissions": {
