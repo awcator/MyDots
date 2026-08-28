@@ -222,19 +222,58 @@ gpt-5.6-luna'
     _clear_anthropic
     export ANTHROPIC_BASE_URL=https://api.deepseek.com/anthropic
     export ANTHROPIC_API_KEY=$DEEPSEEK_KEY
-    export ANTHROPIC_MODEL="deepseek-v4-pro[1m]"
-    export ANTHROPIC_DEFAULT_OPUS_MODEL="deepseek-v4-pro[1m]"
-    export ANTHROPIC_DEFAULT_SONNET_MODEL="deepseek-v4-pro[1m]"
-    export ANTHROPIC_DEFAULT_HAIKU_MODEL=deepseek-v4-flash
-    export CLAUDE_CODE_SUBAGENT_MODEL=deepseek-v4-flash
+
+    # Fetch the live model list from DeepSeek API
+    _ds_models_json="$(curl -sf https://api.deepseek.com/models -H "Authorization: Bearer $ANTHROPIC_API_KEY" 2>/dev/null)"
+
+    if [[ -z "$_ds_models_json" ]]; then
+      echo "deepseek: couldn't fetch models from API (is DEEPSEEK_KEY set?)" >&2
+      return 1 2>/dev/null || exit 1
+    fi
+
+    # Build TSV for _pick
+    _ds_tsv="$(_DS_MODELS_JSON="$_ds_models_json" python3 -c '
+import json, os, re
+try:
+    models = json.loads(os.environ["_DS_MODELS_JSON"])
+    rows = []
+    for m in models.get("data", []):
+        mid = m.get("id", "")
+        # Add a custom description
+        desc = "DeepSeek Reasoning Model" if "pro" in mid or "reasoner" in mid else "DeepSeek Standard Model"
+        rows.append((mid, desc, ""))
+    def nkey(r):
+        return [int(t) if t.isdigit() else t.lower() for t in re.split(r"(\d+)", r[0])]
+    rows.sort(key=nkey)
+    for mid, desc, status in rows:
+        print("%s\t%s\t%s" % (mid, desc, status))
+except Exception:
+    pass
+')"
+
+    _ds_base="${2:-}"
+    if [[ -z "$_ds_base" ]]; then
+      _ds_base="$(_pick "DeepSeek models (api.deepseek.com)" "$_ds_tsv")" \
+        || { echo "  cancelled" >&2; return 1 2>/dev/null || exit 1; }
+    fi
+
+    _ds_fast="$(echo "$_ds_tsv" | cut -f1 | \grep -i flash | head -1)"
+    [[ -z "$_ds_fast" ]] && _ds_fast="$_ds_base"
+
+    export ANTHROPIC_MODEL="$_ds_base"
+    export ANTHROPIC_DEFAULT_OPUS_MODEL="$_ds_base"
+    export ANTHROPIC_DEFAULT_SONNET_MODEL="$_ds_base"
+    export ANTHROPIC_DEFAULT_HAIKU_MODEL="$_ds_fast"
+    export CLAUDE_CODE_SUBAGENT_MODEL="$_ds_fast"
     export CLAUDE_CODE_EFFORT_LEVEL=low
+
     # Remaining API balance (USD)
     _ds_bal="$(curl -sf https://api.deepseek.com/user/balance \
       -H "Authorization: Bearer $ANTHROPIC_API_KEY" 2>/dev/null \
       | \grep -o '"total_balance":"[^"]*"' | cut -d'"' -f4)"
     [[ -z "$CLAUDELOAD_QUIET" && -n "$_ds_bal" ]] && echo "Balance: \$$_ds_bal (deepseek)"
-    [[ -z "$CLAUDELOAD_QUIET" ]] && echo "Loaded: deepseek-v4-pro[1m] (api.deepseek.com)"
-    unset _ds_bal
+    [[ -z "$CLAUDELOAD_QUIET" ]] && echo "Loaded: $ANTHROPIC_MODEL (api.deepseek.com) — fast/subagent: $CLAUDE_CODE_SUBAGENT_MODEL"
+    unset _ds_bal _ds_models_json _ds_tsv _ds_base _ds_fast
     ;;
   antigravity|ag)
     _clear_anthropic

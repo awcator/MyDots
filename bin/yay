@@ -6,7 +6,7 @@
 # ║    1. Static binary analysis   (readelf, objdump, strings, entropy, clamav)║
 # ║    2. PKGBUILD semantic analysis (source parsing, orphan files, namcap)    ║
 # ║    3. Git & AUR forensics      (RPC metadata, commit history, force-push)  ║
-# ║    4. AI deep analysis          (claude -p, DeepSeek fallback)            ║
+# ║    4. AI deep analysis          (claude -p via claudeload)                ║
 # ║                                                                            ║
 # ║  Commands executed:                                                        ║
 # ║    pacman -Si, git clone, readelf, objdump, strings, file, clamdscan,      ║
@@ -497,7 +497,7 @@ scan_layer4_ai() {
     for f in "$dir"/*.install; do
         [ -f "$f" ] && install_content+="
 --- $(basename "$f") ---
-$(cat "$f")"
+$(sed '/^\s*#/d; /^\s*$/d' "$f")"
     done
 
     local binary_report=""
@@ -507,12 +507,12 @@ $(cat "$f")"
             binary_report+="
 === $(basename "$f") ===
 Type: $ftype
-Dynamic symbols: $(readelf -W --dyn-syms "$f" 2>/dev/null | awk '/FUNC.*GLOBAL/{print $NF}' | sort -u | tr '\n' ' ')
-Suspicious strings: $(strings "$f" 2>/dev/null | grep -iE '(socket|connect|exec|system|/tmp/|\.onion|curl|wget|base64|/bin/sh)' | head -10 | tr '\n' '; ')"
+Dynamic symbols: $(readelf -W --dyn-syms "$f" 2>/dev/null | awk '/FUNC.*GLOBAL/{print $NF}' | sort -u | head -20 | tr '\n' ' ')
+Suspicious strings: $(strings "$f" 2>/dev/null | grep -iE '(socket|connect|exec|system|/tmp/|\.onion|curl|wget|base64|/bin/sh)' | head -5 | tr '\n' '; ')"
         fi
     done < <(find "$dir" -path "*/.git" -prune -o -type f -print0)
 
-    local git_log=$(cd "$dir" && git log --oneline --format="%h %ai %an: %s" -10 2>/dev/null)
+    local git_log=$(cd "$dir" && git log --oneline --format="%h %s" -5 2>/dev/null)
     local findings_context=$(get_findings_summary)
     local cur_date=$(date +"%Y-%m-%d")
     local cur_month_year=$(date +"%B %Y")
@@ -530,7 +530,7 @@ GIT LOG:
 $git_log
 
 PKGBUILD:
-$(cat "$pkgbuild")
+$(sed '/^\s*#/d; /^\s*$/d' "$pkgbuild")
 ${install_content:+
 INSTALL FILES:$install_content}
 ${binary_report:+
@@ -549,53 +549,38 @@ Focus on: source authenticity, build process sanity, privilege usage, persistenc
     local result=""
     local ai_source=""
 
-    # Backends to try, in order of preference. Each is loaded with
-    # `source claudeload <profile>`, so we pick whichever LLM backend is actually
-    # up (real Claude via :4141, GLM via :4142, or DeepSeek remote) instead of
-    # blindly inheriting whatever profile the shell happens to be on.
-    local -a backends=(
-        "opus|Claude|http://localhost:4141"
-        "glm|GLM|http://localhost:4142"
-        "deepseek|DeepSeek|https://api.deepseek.com/anthropic"
-    )
-    local attempt profile label proxy
-    local claudeload_bin
-    claudeload_bin="$(command -v claudeload 2>/dev/null || true)"
+    local claudeload_bin="$HOME/bin/claudeload"
 
-    for attempt in "${backends[@]}"; do
-        IFS='|' read -r profile label proxy <<< "$attempt"
-
-        # Skip local proxies that aren't listening — the CLI would hang retrying
-        # a dead endpoint instead of failing fast.
-        case "$proxy" in
-            http://localhost:*|http://127.0.0.1:*)
-                if ! curl -s -m 3 -o /dev/null "$proxy" 2>/dev/null; then
-                    echo -e "  ${YEL}$label proxy ($proxy) is down — skipping${RST}" >&2
-                    continue
-                fi
-                ;;
-        esac
-
-        echo -e "  ${DIM}[L4] asking $label…${RST}" >&2
-
-        if [ -n "$claudeload_bin" ]; then
-            result=$( (
-                unset ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN
-                CLAUDELOAD_QUIET=1 source "$claudeload_bin" "$profile" >/dev/null 2>&1
-                echo "$prompt" | timeout 300 claude -p 2>/dev/null
-            ) ) || result=""
+    if [ -z "${_AUR_AI_LOADED:-}" ]; then
+        if [ ! -f "$claudeload_bin" ]; then
+            claudeload_bin="$(command -v claudeload 2>/dev/null || true)"
         fi
 
-        if [ -n "$result" ]; then
-            ai_source="$label"
-            break
+        if [ -n "$claudeload_bin" ] && [ -f "$claudeload_bin" ]; then
+            echo -e "  ${DIM}[L4] Please choose an AI backend for this session...${RST}" >&2
+            set +eu
+            export CLAUDELOAD_QUIET=""
+            source "$claudeload_bin" menu </dev/tty >/dev/tty
+            set -euo pipefail
+            export _AUR_AI_LOADED=1
+            export _AUR_AI_LABEL="${ANTHROPIC_MODEL:-Claude}"
+        else
+            echo -e "  ${YEL}claudeload not found${RST}" >&2
+            return 1
         fi
-    done
+    fi
 
-    if [ -z "$ai_source" ] || [ -z "$result" ]; then
-        echo -e "  ${YEL}AI unavailable (Claude, GLM and DeepSeek all failed)${RST}" >&2
+    echo -e "  ${DIM}[L4] asking ${_AUR_AI_LABEL}…${RST}" >&2
+
+    result=$( (
+        echo "$prompt" | timeout 300 claude -p 2>/dev/null
+    ) ) || result=""
+
+    if [ -z "$result" ]; then
+        echo -e "  ${YEL}AI analysis failed or timed out${RST}" >&2
         return 1
     fi
+    ai_source="${_AUR_AI_LABEL}"
 
     # Display (stderr → terminal, so the report is not swallowed by $())
     echo "" >&2
@@ -728,7 +713,7 @@ validate_package() {
             [[ "$answer" =~ ^[Yy]$ ]] && return 0 || return 1
             ;;
         UNAVAILABLE)
-            log_event "$pkg" "UNKNOWN" "AI unavailable (Claude + DeepSeek), $red_count red, $yel_count yellow"
+            log_event "$pkg" "UNKNOWN" "AI unavailable, $red_count red, $yel_count yellow"
             echo -e "${YEL}[aur-guard] ⚠ AI unavailable — static scan only${RST}"
             if $NOCONFIRM; then
                 echo -e "${YEL}[aur-guard] --noconfirm → BLOCK (AI unavailable)${RST}"
