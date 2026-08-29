@@ -111,7 +111,7 @@ case "${1:-}" in
   ""|menu|m)
     echo "claudeload — pick a backend:"
     PS3="  backend> "
-    select _prof in copilot windsurf deepseek antigravity; do
+    select _prof in copilot windsurf deepseek antigravity aistudio; do
       [[ -n "$_prof" ]] && break
     done
     source "$_CLD_SELF" "$_prof"
@@ -352,6 +352,83 @@ print("  accounts: %d/%d available, %d rate-limited" % (s.get("available",0), s.
     export CLAUDE_CODE_SUBAGENT_MODEL="$_ag_fast"
     unset _ag_base _ag_fast _ag_all _ag_tsv _ag_models_json _ag_accounts_json
     [[ -z "$CLAUDELOAD_QUIET" ]] && echo "Loaded: $ANTHROPIC_MODEL (antigravity, :9080) — fast/subagent: $ANTHROPIC_SMALL_FAST_MODEL"
+    ;;
+  aistudio|ai)
+    _clear_anthropic
+    if [[ -z "$GEMINI_API_KEY" ]]; then
+      echo "aistudio: GEMINI_API_KEY not found in env" >&2
+      return 1 2>/dev/null || exit 1
+    fi
+
+    if ! command -v litellm >/dev/null 2>&1; then
+      export PATH="$PATH:$HOME/.local/bin"
+    fi
+    if ! command -v litellm >/dev/null 2>&1; then
+      echo "aistudio: litellm not found! Install via: uv tool install 'litellm[proxy]'" >&2
+      return 1 2>/dev/null || exit 1
+    fi
+
+    _ai_models_json="$(curl -sf "https://generativelanguage.googleapis.com/v1beta/models?key=$GEMINI_API_KEY" 2>/dev/null)"
+    if [[ -z "$_ai_models_json" ]]; then
+      echo "aistudio: couldn't fetch models from API (is GEMINI_API_KEY valid?)" >&2
+      return 1 2>/dev/null || exit 1
+    fi
+
+    _ai_config="/tmp/claudeload_aistudio_litellm.yaml"
+    printf "%s" "$_ai_models_json" | python3 -c '
+import json, sys
+models = json.load(sys.stdin).get("models", [])
+print("model_list:")
+for m in models:
+    name = m.get("name", "").replace("models/", "")
+    print(f"  - model_name: {name}")
+    print(f"    litellm_params:")
+    print(f"      model: gemini/{name}")
+    print(f"      api_key: os.environ/GEMINI_API_KEY")
+' > "$_ai_config"
+
+    export ANTHROPIC_BASE_URL=http://localhost:9083
+    export ANTHROPIC_API_KEY=dummy
+    _spawn_proxy aistudio 9083 litellm --config "$_ai_config" --port 9083
+
+    _ai_tsv="$(_AI_MODELS_JSON="$_ai_models_json" python3 -c '
+import json, os, re
+try:
+    models = json.loads(os.environ["_AI_MODELS_JSON"]).get("models", [])
+    rows = []
+    for m in models:
+        mid = m.get("name", "").replace("models/", "")
+        desc = m.get("displayName", "")
+        if "generateContent" not in m.get("supportedGenerationMethods", []):
+            continue
+        rows.append((mid, desc, ""))
+    def nkey(r):
+        return [int(t) if t.isdigit() else t.lower() for t in re.split(r"(\d+)", r[0])]
+    rows.sort(key=nkey)
+    for mid, desc, status in rows:
+        print("%s\t%s\t%s" % (mid, desc, status))
+except Exception:
+    pass
+')"
+
+    _ai_base="${2:-}"
+    if [[ -z "$_ai_base" ]]; then
+      _ai_base="$(_pick "Google AI Studio models (:9083)" "$_ai_tsv")" \
+        || { echo "  cancelled" >&2; return 1 2>/dev/null || exit 1; }
+    fi
+
+    _ai_fast="$(echo "$_ai_tsv" | cut -f1 | \grep -i flash | \grep -viE 'preview|lite|tts|image|transcribe' | tail -1)"
+    [[ -z "$_ai_fast" ]] && _ai_fast="$_ai_base"
+
+    export ANTHROPIC_MODEL="$_ai_base"
+    export ANTHROPIC_DEFAULT_OPUS_MODEL="$_ai_base"
+    export ANTHROPIC_DEFAULT_SONNET_MODEL="$_ai_base"
+    export ANTHROPIC_DEFAULT_HAIKU_MODEL="$_ai_fast"
+    export ANTHROPIC_SMALL_FAST_MODEL="$_ai_fast"
+    export CLAUDE_CODE_SUBAGENT_MODEL="$_ai_fast"
+
+    [[ -z "$CLAUDELOAD_QUIET" ]] && echo "Loaded: $ANTHROPIC_MODEL (aistudio, :9083) — fast/subagent: $ANTHROPIC_SMALL_FAST_MODEL"
+    unset _ai_models_json _ai_tsv _ai_base _ai_fast _ai_config
     ;;
   status|s)
     echo "ANTHROPIC_BASE_URL=$ANTHROPIC_BASE_URL"
