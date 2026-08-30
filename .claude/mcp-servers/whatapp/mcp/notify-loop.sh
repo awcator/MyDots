@@ -29,5 +29,5 @@ esac
 if [ -n "$msg" ]; then
   # The `wa` CLI reads whatsapp.db relative to its working directory.
   cd ~/.claude/mcp-servers/whatapp || exit 0
-  ./wa send "$msg" >/dev/null 2>&1
+  ~/bin/wa send "$msg" >/dev/null 2>&1
 fi

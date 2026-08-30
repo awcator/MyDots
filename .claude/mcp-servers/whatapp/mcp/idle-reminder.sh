@@ -32,7 +32,7 @@ log() {
 
 send() {
   local msg="$1"
-  ( cd ~/.claude/mcp-servers/whatapp && ./wa send "$msg" >/dev/null 2>&1 )
+  ~/bin/wa send "$msg" >/dev/null 2>&1
 }
 
 # last_activity extracts a short phrase describing what Claude was last doing,
@@ -63,9 +63,9 @@ call_escalation() {
   if ~/.claude/mcp-servers/whatapp/tts-venv/bin/edge-tts \
       --voice "$voice" --text "$text" --write-media "$mp3" >/dev/null 2>&1 \
       && [ -s "$mp3" ]; then
-    ( cd ~/.claude/mcp-servers/whatapp && ./wa call "$mp3" >/dev/null 2>&1 )
+    ~/bin/wa call "$mp3" >/dev/null 2>&1
   else
-    ( cd ~/.claude/mcp-servers/whatapp && ./wa call >/dev/null 2>&1 )
+    ~/bin/wa call >/dev/null 2>&1
   fi
   rm -f "$mp3"
 }
