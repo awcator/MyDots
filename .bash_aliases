@@ -1,6 +1,6 @@
 alias calude="claude"
 alias less="less -R"
-alias feh="feh --recursive --auto-zoom --scale-down --action2 ';realpath %F | xclip -selection clipboard'"
+alias feh="feh -q --recursive --auto-zoom --scale-down --action2 ';realpath %F | xclip -selection clipboard'"
 alias sandbox="firejail --noprofile --whitelist=/home/awcator/Downloads --whitelist=/home/awcator/.renpy  --whitelist=~/.config/unity3d/ --seccomp --caps.drop=all --net=none"
 alias htop="htop -s PERCENT_CPU -t"
 alias la="ls -a"
