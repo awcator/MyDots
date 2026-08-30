@@ -40,6 +40,7 @@ PREFER="local"  # "local" or "repo"
 
 # Home-directory dotfiles
 HOME_DOTS=(
+    .gtkrc-2.0
     .bashrc
     .bash_profile
     .bash_aliases
@@ -57,6 +58,9 @@ HOME_DOTS=(
 
 # .config directories to manage (entire directory trees)
 CONFIG_DIRS=(
+    Thunar
+    gtk-3.0
+    xfce4
     alacritty
     btop
     cmus
@@ -640,7 +644,7 @@ check_link() {
 }
 
 # Check home dotfiles
-for f in .bashrc .bash_profile .bash_aliases .bash_logout .inputrc .vimrc \
+for f in .gtkrc-2.0 .bashrc .bash_profile .bash_aliases .bash_logout .inputrc .vimrc \
          .gitconfig .tmux.conf .xinitrc .Xresources .Xdefaults .i3status.conf .zshrc; do
     [[ -f "$DOTDIR/$f" ]] && check_link "$HOME/$f"
 done

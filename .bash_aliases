@@ -90,3 +90,4 @@ alias catall="tail -n +1"
 alias tree="tree -C -h --dirsfirst -F"
 alias short_grep='grep -R -o -P ".{0,20}sloginName.{0,20}"'
 alias cr="claude-recent"
+alias agy="agy --dangerously-skip-permissions"
