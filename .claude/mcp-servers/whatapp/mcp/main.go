@@ -1,11 +1,10 @@
 // Command wa-mcp is a Model Context Protocol (MCP) server that lets an AI
-// agent (e.g. Claude Code) send WhatsApp messages by shelling out to the `wa`
-// CLI. Its primary purpose is to let the agent notify / ping a human operator
-// when it needs attention or hits a decision only a human can make.
+// agent (e.g. Claude Code) send WhatsApp messages, images, and files by
+// shelling out to the `wa` CLI.
 //
 // Configuration (all optional, via environment variables):
 //
-//	WA_BIN    path to the `wa` binary          (default: "wa", looked up on PATH)
+//	WA_BIN    path to the `wa` binary          (default: <WA_DIR>/wa, then "wa" on PATH)
 //	WA_DIR    working dir for the `wa` binary  (default: ~/.claude/mcp-servers/whatapp)
 //	TTS_BIN   path to edge-tts                 (default: <WA_DIR>/tts-venv/bin/edge-tts,
 //	          then "edge-tts" on PATH)
@@ -31,28 +30,23 @@ func main() {
 }
 
 func run() error {
-	waBin := os.Getenv("WA_BIN")
-	if waBin == "" {
-		waBin = "wa"
-	}
 	waDir := os.Getenv("WA_DIR")
 	if waDir == "" {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return fmt.Errorf("resolve home dir: %w", err)
+		if home, err := os.UserHomeDir(); err == nil {
+			waDir = filepath.Join(home, ".claude", "mcp-servers", "whatapp")
 		}
-		waDir = filepath.Join(home, ".claude", "mcp-servers", "whatapp")
 	}
 
-	ttsBin := os.Getenv("TTS_BIN")
-	if ttsBin == "" {
-		venv := filepath.Join(waDir, "tts-venv", "bin", "edge-tts")
-		if _, err := os.Stat(venv); err == nil {
-			ttsBin = venv
+	waBin := os.Getenv("WA_BIN")
+	if waBin == "" {
+		localBin := filepath.Join(waDir, "wa")
+		if _, err := os.Stat(localBin); err == nil {
+			waBin = localBin
 		} else {
-			ttsBin = "edge-tts"
+			waBin = "wa"
 		}
 	}
+
 	ttsVoice := os.Getenv("TTS_VOICE")
 	if ttsVoice == "" {
 		ttsVoice = "en-US-AriaNeural"
@@ -64,6 +58,18 @@ func run() error {
 		server.WithToolCapabilities(true),
 	)
 
+	// runWa executes the wa CLI command with unified error handling and formatting.
+	runWa := func(ctx context.Context, args ...string) (*mcp.CallToolResult, error) {
+		cmd := exec.CommandContext(ctx, waBin, args...)
+		cmd.Dir = waDir
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("failed: %v: %s", err, out)), nil
+		}
+		return mcp.NewToolResultText(string(out)), nil
+	}
+
+	// 1. send_message
 	sendTool := mcp.NewTool("send_message",
 		mcp.WithDescription(
 			"Send a WhatsApp message to the operator's watch number. Use this to "+
@@ -73,38 +79,157 @@ func run() error {
 			mcp.Required(),
 			mcp.Description("The message text to send."),
 		),
+		mcp.WithString("image_path",
+			mcp.Description("Optional path to an image to send with the message as caption."),
+		),
+		mcp.WithString("attachment_path",
+			mcp.Description("Optional path to a file/document to send with the message as caption."),
+		),
 	)
 	s.AddTool(sendTool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		args, _ := req.Params.Arguments.(map[string]any)
 
 		message, _ := args["message"].(string)
+		if img, _ := args["image_path"].(string); img == "" {
+			img, _ = args["image"].(string)
+			if img != "" {
+				cmdArgs := []string{"send-image", resolvePath(img)}
+				if message != "" {
+					cmdArgs = append(cmdArgs, message)
+				}
+				return runWa(ctx, cmdArgs...)
+			}
+		} else {
+			cmdArgs := []string{"send-image", resolvePath(img)}
+			if message != "" {
+				cmdArgs = append(cmdArgs, message)
+			}
+			return runWa(ctx, cmdArgs...)
+		}
+
+		if file, _ := args["attachment_path"].(string); file == "" {
+			file, _ = args["attachment"].(string)
+			if file == "" {
+				file, _ = args["file"].(string)
+			}
+			if file != "" {
+				cmdArgs := []string{"send-file", resolvePath(file)}
+				if message != "" {
+					cmdArgs = append(cmdArgs, message)
+				}
+				return runWa(ctx, cmdArgs...)
+			}
+		} else {
+			cmdArgs := []string{"send-file", resolvePath(file)}
+			if message != "" {
+				cmdArgs = append(cmdArgs, message)
+			}
+			return runWa(ctx, cmdArgs...)
+		}
+
 		if message == "" {
 			return mcp.NewToolResultError("missing required parameter: message"), nil
 		}
-
-		// The `wa` binary bakes in the watch number; it always sends there.
-		cmd := exec.CommandContext(ctx, waBin, "send", message)
-		cmd.Dir = waDir
-		out, err := cmd.CombinedOutput()
-		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("failed to send: %v: %s", err, out)), nil
-		}
-		return mcp.NewToolResultText(string(out)), nil
+		return runWa(ctx, "send", message)
 	})
 
-	statusTool := mcp.NewTool("status",
-		mcp.WithDescription("Check the WhatsApp login status of the underlying CLI."),
+	// 2. send_image
+	handleSendImage := func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		args, _ := req.Params.Arguments.(map[string]any)
+
+		path, _ := args["path"].(string)
+		if path == "" {
+			path, _ = args["image_path"].(string)
+		}
+		if path == "" {
+			path, _ = args["file_path"].(string)
+		}
+		if path == "" {
+			return mcp.NewToolResultError("missing required parameter: path"), nil
+		}
+
+		cmdArgs := []string{"send-image", resolvePath(path)}
+		if caption, _ := args["caption"].(string); caption != "" {
+			cmdArgs = append(cmdArgs, caption)
+		}
+		return runWa(ctx, cmdArgs...)
+	}
+
+	sendImageTool := mcp.NewTool("send_image",
+		mcp.WithDescription(
+			"Send a photo/image file (e.g. PNG, JPG, GIF, WebP) with an optional caption to the operator's watch number via WhatsApp."),
+		mcp.WithString("path",
+			mcp.Required(),
+			mcp.Description("The file path to the image to send."),
+		),
+		mcp.WithString("caption",
+			mcp.Description("Optional caption for the image."),
+		),
 	)
-	s.AddTool(statusTool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		cmd := exec.CommandContext(ctx, waBin, "status")
-		cmd.Dir = waDir
-		out, err := cmd.CombinedOutput()
-		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("failed: %v: %s", err, out)), nil
-		}
-		return mcp.NewToolResultText(string(out)), nil
-	})
+	s.AddTool(sendImageTool, handleSendImage)
 
+	sendPhotoTool := mcp.NewTool("send_photo",
+		mcp.WithDescription(
+			"Send a photo/image file (alias for send_image) with an optional caption to the operator's watch number via WhatsApp."),
+		mcp.WithString("path",
+			mcp.Required(),
+			mcp.Description("The file path to the photo/image to send."),
+		),
+		mcp.WithString("caption",
+			mcp.Description("Optional caption for the photo."),
+		),
+	)
+	s.AddTool(sendPhotoTool, handleSendImage)
+
+	// 3. send_file
+	handleSendFile := func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		args, _ := req.Params.Arguments.(map[string]any)
+
+		path, _ := args["path"].(string)
+		if path == "" {
+			path, _ = args["file_path"].(string)
+		}
+		if path == "" {
+			path, _ = args["attachment"].(string)
+		}
+		if path == "" {
+			return mcp.NewToolResultError("missing required parameter: path"), nil
+		}
+
+		cmdArgs := []string{"send-file", resolvePath(path)}
+		if caption, _ := args["caption"].(string); caption != "" {
+			cmdArgs = append(cmdArgs, caption)
+		}
+		return runWa(ctx, cmdArgs...)
+	}
+
+	sendFileTool := mcp.NewTool("send_file",
+		mcp.WithDescription(
+			"Send a document or file attachment (e.g. PDF, log file, text file, zip, code) with an optional caption to the operator's watch number via WhatsApp."),
+		mcp.WithString("path",
+			mcp.Required(),
+			mcp.Description("The file path to the document/file to send as an attachment."),
+		),
+		mcp.WithString("caption",
+			mcp.Description("Optional caption or description for the attachment."),
+		),
+	)
+	s.AddTool(sendFileTool, handleSendFile)
+
+	sendAttachmentTool := mcp.NewTool("send_attachment",
+		mcp.WithDescription(
+			"Send a document or file attachment (alias for send_file) with an optional caption to the operator's watch number via WhatsApp."),
+		mcp.WithString("path",
+			mcp.Required(),
+			mcp.Description("The file path to the document/attachment to send."),
+		),
+		mcp.WithString("caption",
+			mcp.Description("Optional caption or description for the attachment."),
+		),
+	)
+	s.AddTool(sendAttachmentTool, handleSendFile)
+
+	// 4. call
 	callTool := mcp.NewTool("call",
 		mcp.WithDescription(
 			"Place a WhatsApp voice call to the operator's watch number. The call rings "+
@@ -123,6 +248,7 @@ func run() error {
 
 		audio, _ := args["audio"].(string)
 		if text, _ := args["text"].(string); text != "" {
+			ttsBin := resolveTTSBin(waDir)
 			path, err := generateSpeech(ctx, ttsBin, ttsVoice, text, os.TempDir())
 			if err != nil {
 				return mcp.NewToolResultError(err.Error()), nil
@@ -135,17 +261,58 @@ func run() error {
 		if audio != "" {
 			cmdArgs = append(cmdArgs, audio)
 		}
-
-		cmd := exec.CommandContext(ctx, waBin, cmdArgs...)
-		cmd.Dir = waDir
-		out, err := cmd.CombinedOutput()
-		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("failed to call: %v: %s", err, out)), nil
-		}
-		return mcp.NewToolResultText(string(out)), nil
+		return runWa(ctx, cmdArgs...)
 	})
 
 	return server.ServeStdio(s)
+}
+
+// resolveTTSBin locates the edge-tts executable.
+func resolveTTSBin(waDir string) string {
+	if env := os.Getenv("TTS_BIN"); env != "" {
+		if _, err := os.Stat(env); err == nil {
+			return env
+		}
+	}
+	candidates := []string{
+		filepath.Join(waDir, "tts-venv", "bin", "edge-tts"),
+	}
+	if home, err := os.UserHomeDir(); err == nil {
+		candidates = append(candidates,
+			filepath.Join(home, ".local", "bin", "edge-tts"),
+			filepath.Join(home, ".claude", "mcp-servers", "whatapp", "tts-venv", "bin", "edge-tts"),
+			filepath.Join(home, "Documents", "MyDots", ".claude", "mcp-servers", "whatapp", "tts-venv", "bin", "edge-tts"),
+		)
+	}
+	for _, candidate := range candidates {
+		if _, err := os.Stat(candidate); err == nil {
+			return candidate
+		}
+	}
+	if p, err := exec.LookPath("edge-tts"); err == nil {
+		return p
+	}
+	return candidates[0]
+}
+
+// resolvePath returns the clean absolute path for a given path string.
+func resolvePath(p string) string {
+	if p == "" {
+		return ""
+	}
+	if filepath.IsAbs(p) {
+		return filepath.Clean(p)
+	}
+	if cwd, err := os.Getwd(); err == nil {
+		candidate := filepath.Join(cwd, p)
+		if _, err := os.Stat(candidate); err == nil {
+			return filepath.Clean(candidate)
+		}
+	}
+	if abs, err := filepath.Abs(p); err == nil {
+		return filepath.Clean(abs)
+	}
+	return filepath.Clean(p)
 }
 
 // generateSpeech renders text to a temporary .mp3 using edge-tts (a Python

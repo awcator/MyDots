@@ -6,10 +6,14 @@
 //
 // Usage:
 //
-//	wa login                 # print a QR code and wait for you to scan it
-//	wa login-code <phone>    # pair via "Link with phone number" (8-char code)
-//	wa send <recip> <text>   # send a text message
-//	wa status                # show login state
+//	wa login                        # print a QR code and wait for you to scan it
+//	wa login-code <phone>           # pair via "Link with phone number" (8-char code)
+//	wa send <text>                  # send a text message
+//	wa send-image <path> [caption]  # send an image/photo
+//	wa send-file <path> [caption]   # send a document/attachment
+//	wa send-media <path> [caption]  # send auto-detected media (photo or document)
+//	wa call [audio]                 # call the watch number; ring, then hang up (or play audio)
+//	wa status                       # show login state
 //
 // <recip> may be:
 //   - "self" or "me"        -> your own "Message yourself" chat
@@ -18,10 +22,17 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"errors"
 	"fmt"
+	"image"
+	_ "image/gif"
+	_ "image/jpeg"
+	_ "image/png"
+	"mime"
+	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -67,13 +78,7 @@ func run() error {
 	// The store path is FIXED and independent of the binary's location:
 	// WA_DIR if set, else ~/.local/share/wa. This way the binary finds its
 	// session no matter where it is invoked from (not tied to os.Executable,
-	// which broke when a copy lived in ~/go/bin).
-	dbDir := os.Getenv("WA_DIR")
-	if dbDir == "" {
-		if home, err := os.UserHomeDir(); err == nil {
-			dbDir = filepath.Join(home, ".local", "share", "wa")
-		}
-	}
+	dbDir := getStoreDir()
 	if err := os.MkdirAll(dbDir, 0700); err != nil {
 		return fmt.Errorf("create store dir: %w", err)
 	}
@@ -95,6 +100,11 @@ func run() error {
 
 	client := whatsmeow.NewClient(deviceStore, waLog.Noop)
 
+	recipient := defaultRecipient
+	if envRecip := os.Getenv("WA_RECIPIENT"); envRecip != "" {
+		recipient = envRecip
+	}
+
 	switch {
 	case len(os.Args) < 2:
 		usage()
@@ -110,13 +120,40 @@ func run() error {
 		if len(os.Args) < 3 {
 			return errors.New("usage: wa send <message>")
 		}
-		return send(ctx, client, defaultRecipient, strings.Join(os.Args[2:], " "))
+		return send(ctx, client, recipient, strings.Join(os.Args[2:], " "))
+	case os.Args[1] == "send-image" || os.Args[1] == "send-photo" || os.Args[1] == "image" || os.Args[1] == "photo":
+		if len(os.Args) < 3 {
+			return errors.New("usage: wa send-image <path-to-image> [caption]")
+		}
+		caption := ""
+		if len(os.Args) >= 4 {
+			caption = strings.Join(os.Args[3:], " ")
+		}
+		return sendImage(ctx, client, recipient, os.Args[2], caption)
+	case os.Args[1] == "send-file" || os.Args[1] == "send-doc" || os.Args[1] == "send-document" || os.Args[1] == "send-attachment" || os.Args[1] == "file" || os.Args[1] == "doc" || os.Args[1] == "attachment":
+		if len(os.Args) < 3 {
+			return errors.New("usage: wa send-file <path-to-file> [caption]")
+		}
+		caption := ""
+		if len(os.Args) >= 4 {
+			caption = strings.Join(os.Args[3:], " ")
+		}
+		return sendDocument(ctx, client, recipient, os.Args[2], caption)
+	case os.Args[1] == "send-media" || os.Args[1] == "media":
+		if len(os.Args) < 3 {
+			return errors.New("usage: wa send-media <path-to-file> [caption]")
+		}
+		caption := ""
+		if len(os.Args) >= 4 {
+			caption = strings.Join(os.Args[3:], " ")
+		}
+		return sendMedia(ctx, client, recipient, os.Args[2], caption)
 	case os.Args[1] == "call":
 		audioFile := ""
 		if len(os.Args) >= 3 {
 			audioFile = os.Args[2]
 		}
-		return call(ctx, client, defaultRecipient, audioFile)
+		return call(ctx, client, recipient, audioFile)
 	case os.Args[1] == "status":
 		return status(ctx, client)
 	default:
@@ -127,11 +164,14 @@ func run() error {
 
 func usage() {
 	fmt.Println(`usage:
-  wa login                 # scan QR code once to log in
-  wa login-code <phone>    # pair via "Link with phone number" (8-char code)
-  wa send <text>           # send a message to the watch number
-  wa call [audio]          # call the watch number; ring, then hang up (or play audio)
-  wa status                # show login state`)
+  wa login                        # scan QR code once to log in
+  wa login-code <phone>           # pair via "Link with phone number" (8-char code)
+  wa send <text>                  # send a message to the watch number
+  wa send-image <path> [caption]  # send an image/photo to the watch number
+  wa send-file <path> [caption]   # send a document/attachment to the watch number
+  wa send-media <path> [caption]  # send auto-detected media (photo/document)
+  wa call [audio]                 # call the watch number; ring, then hang up (or play audio)
+  wa status                       # show login state`)
 }
 
 // login connects to WhatsApp and, if no session exists yet, prints a QR code
@@ -236,17 +276,7 @@ func status(ctx context.Context, client *whatsmeow.Client) error {
 	return nil
 }
 
-func send(ctx context.Context, client *whatsmeow.Client, recip, text string) error {
-	if client.Store.ID == nil {
-		return errors.New("not logged in — run `wa login` first")
-	}
-
-	to, err := resolveRecipient(client, recip)
-	if err != nil {
-		return err
-	}
-
-	// Connect (idempotent) and wait until the socket is ready.
+func connect(ctx context.Context, client *whatsmeow.Client) error {
 	ready := make(chan struct{})
 	client.AddEventHandler(func(evt any) {
 		if _, ok := evt.(*events.Connected); ok {
@@ -260,8 +290,24 @@ func send(ctx context.Context, client *whatsmeow.Client, recip, text string) err
 	if err := client.Connect(); err != nil {
 		return fmt.Errorf("connect: %w", err)
 	}
-	defer client.Disconnect()
 	waitFor(ctx, ready)
+	return nil
+}
+
+func send(ctx context.Context, client *whatsmeow.Client, recip, text string) error {
+	if client.Store.ID == nil {
+		return errors.New("not logged in — run `wa login` first")
+	}
+
+	to, err := resolveRecipient(client, recip)
+	if err != nil {
+		return err
+	}
+
+	if err := connect(ctx, client); err != nil {
+		return err
+	}
+	defer client.Disconnect()
 
 	msg := &waProto.Message{Conversation: proto.String(text)}
 	resp, err := client.SendMessage(ctx, to, msg)
@@ -270,6 +316,144 @@ func send(ctx context.Context, client *whatsmeow.Client, recip, text string) err
 	}
 	fmt.Printf("✅ sent to %s (id %s)\n", to.String(), resp.ID)
 	return nil
+}
+
+func sendImage(ctx context.Context, client *whatsmeow.Client, recip, filePath, caption string) error {
+	if client.Store.ID == nil {
+		return errors.New("not logged in — run `wa login` first")
+	}
+
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		return fmt.Errorf("read image: %w", err)
+	}
+
+	to, err := resolveRecipient(client, recip)
+	if err != nil {
+		return err
+	}
+
+	if err := connect(ctx, client); err != nil {
+		return err
+	}
+	defer client.Disconnect()
+
+	mimeType := detectMimeType(filePath, data, "image/jpeg")
+
+	resp, err := client.Upload(ctx, data, whatsmeow.MediaImage)
+	if err != nil {
+		return fmt.Errorf("upload image: %w", err)
+	}
+
+	imgMsg := &waProto.ImageMessage{
+		Mimetype:      proto.String(mimeType),
+		URL:           &resp.URL,
+		DirectPath:    &resp.DirectPath,
+		MediaKey:      resp.MediaKey,
+		FileEncSHA256: resp.FileEncSHA256,
+		FileSHA256:    resp.FileSHA256,
+		FileLength:    &resp.FileLength,
+	}
+	if caption != "" {
+		imgMsg.Caption = proto.String(caption)
+	}
+
+	if cfg, _, err := image.DecodeConfig(bytes.NewReader(data)); err == nil {
+		if cfg.Width > 0 && cfg.Height > 0 {
+			imgMsg.Width = proto.Uint32(uint32(cfg.Width))
+			imgMsg.Height = proto.Uint32(uint32(cfg.Height))
+		}
+	}
+
+	msg := &waProto.Message{ImageMessage: imgMsg}
+	sendResp, err := client.SendMessage(ctx, to, msg)
+	if err != nil {
+		return fmt.Errorf("send image: %w", err)
+	}
+	fmt.Printf("✅ sent image %s to %s (id %s)\n", filepath.Base(filePath), to.String(), sendResp.ID)
+	return nil
+}
+
+func sendDocument(ctx context.Context, client *whatsmeow.Client, recip, filePath, caption string) error {
+	if client.Store.ID == nil {
+		return errors.New("not logged in — run `wa login` first")
+	}
+
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		return fmt.Errorf("read document: %w", err)
+	}
+
+	to, err := resolveRecipient(client, recip)
+	if err != nil {
+		return err
+	}
+
+	if err := connect(ctx, client); err != nil {
+		return err
+	}
+	defer client.Disconnect()
+
+	fileName := filepath.Base(filePath)
+	mimeType := detectMimeType(filePath, data, "application/octet-stream")
+
+	resp, err := client.Upload(ctx, data, whatsmeow.MediaDocument)
+	if err != nil {
+		return fmt.Errorf("upload document: %w", err)
+	}
+
+	docMsg := &waProto.DocumentMessage{
+		URL:           &resp.URL,
+		DirectPath:    &resp.DirectPath,
+		MediaKey:      resp.MediaKey,
+		FileEncSHA256: resp.FileEncSHA256,
+		FileSHA256:    resp.FileSHA256,
+		FileLength:    &resp.FileLength,
+		FileName:      proto.String(fileName),
+		Title:         proto.String(fileName),
+		Mimetype:      proto.String(mimeType),
+	}
+	if caption != "" {
+		docMsg.Caption = proto.String(caption)
+	}
+
+	msg := &waProto.Message{DocumentMessage: docMsg}
+	sendResp, err := client.SendMessage(ctx, to, msg)
+	if err != nil {
+		return fmt.Errorf("send document: %w", err)
+	}
+	fmt.Printf("✅ sent attachment %s to %s (id %s)\n", fileName, to.String(), sendResp.ID)
+	return nil
+}
+
+func sendMedia(ctx context.Context, client *whatsmeow.Client, recip, filePath, caption string) error {
+	ext := strings.ToLower(filepath.Ext(filePath))
+	switch ext {
+	case ".jpg", ".jpeg", ".png", ".gif", ".webp":
+		return sendImage(ctx, client, recip, filePath, caption)
+	default:
+		f, err := os.Open(filePath)
+		if err == nil {
+			buf := make([]byte, 512)
+			n, _ := f.Read(buf)
+			f.Close()
+			if strings.HasPrefix(http.DetectContentType(buf[:n]), "image/") {
+				return sendImage(ctx, client, recip, filePath, caption)
+			}
+		}
+		return sendDocument(ctx, client, recip, filePath, caption)
+	}
+}
+
+func detectMimeType(filePath string, data []byte, fallback string) string {
+	m := mime.TypeByExtension(filepath.Ext(filePath))
+	if m == "" && len(data) > 0 {
+		m = http.DetectContentType(data)
+	}
+	if m == "" {
+		m = fallback
+	}
+	return strings.Split(m, ";")[0]
 }
 
 // call places a 1:1 WhatsApp voice call to recip. With an audio file it plays that
@@ -410,21 +594,10 @@ func resolveRecipient(client *whatsmeow.Client, arg string) (types.JID, error) {
 // connectAndWait is used after an already-stored session: connect and wait
 // until the client reports it is connected.
 func connectAndWait(ctx context.Context, client *whatsmeow.Client) error {
-	ready := make(chan struct{})
-	client.AddEventHandler(func(evt any) {
-		if _, ok := evt.(*events.Connected); ok {
-			select {
-			case <-ready:
-			default:
-				close(ready)
-			}
-		}
-	})
-	if err := client.Connect(); err != nil {
-		return fmt.Errorf("connect: %w", err)
+	if err := connect(ctx, client); err != nil {
+		return err
 	}
 	defer client.Disconnect()
-	waitFor(ctx, ready)
 	return nil
 }
 
@@ -441,4 +614,25 @@ func waitFor(ctx context.Context, ready <-chan struct{}) {
 	case <-sig:
 		fmt.Fprintln(os.Stderr, "\ninterrupted")
 	}
+}
+
+// getStoreDir resolves the database storage directory, prioritizing WA_STORE_DIR
+// and the standard user directory ~/.local/share/wa.
+func getStoreDir() string {
+	if env := os.Getenv("WA_STORE_DIR"); env != "" {
+		return env
+	}
+	if home, err := os.UserHomeDir(); err == nil {
+		std := filepath.Join(home, ".local", "share", "wa")
+		if _, err := os.Stat(filepath.Join(std, dbFile)); err == nil {
+			return std
+		}
+	}
+	if env := os.Getenv("WA_DIR"); env != "" {
+		return env
+	}
+	if home, err := os.UserHomeDir(); err == nil {
+		return filepath.Join(home, ".local", "share", "wa")
+	}
+	return "."
 }

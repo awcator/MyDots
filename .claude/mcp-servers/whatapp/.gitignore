@@ -9,3 +9,4 @@ whatsapp.db-wal
 
 # Scratch files
 login_output.txt
+tts-venv/
