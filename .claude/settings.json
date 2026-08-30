@@ -6,6 +6,9 @@
     "PLAYWRIGHT_MCP_USER_DATA_DIR": "~/.config/BraveSoftware/Brave-Browser",
     "TMUX_TMPDIR": "/var/tmp"
   },
+  "attribution": {
+    "pr": ""
+  },
   "permissions": {
     "allow": [
       "Bash(.*:*)",
@@ -25,7 +28,6 @@
     ],
     "defaultMode": "bypassPermissions"
   },
-  "model": "haiku",
   "hooks": {
     "Notification": [
       {
