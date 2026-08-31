@@ -11,3 +11,5 @@ id_ed25519
 .idea
 .aider*
 **/node_modules
+bin/wa
+bin/wa-mcp
