@@ -157,4 +157,3 @@ case ":$PATH:" in
   *":$HOME/.claude-code-router/bin:"*) ;;
   *) export PATH="$HOME/.claude-code-router/bin:$PATH" ;;
 esac
-# <<< Claude Code Router CLI <<<export SUDO_ASKPASS="$HOME/.local/bin/claude-askpass"
