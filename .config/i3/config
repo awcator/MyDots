@@ -468,15 +468,16 @@ bindsym XF86MonBrightnessDown exec --no-startup-id ~/.config/i3/osd.sh bright-do
 #exec --no-startup-id ./i3status.sh
 #exec --no-startup-id  xwinwrap -ov -fs -- mplayer -wid WID -quiet -loop 0 ~/car.mp4
 
-# Screenshots with scrot
-bindsym --release Shift+Print exec bash -c 'scrot --select --line mode=edge -q 100 -s /tmp/scrot_clip.png && xclip -selection clipboard -t image/png -i /tmp/scrot_clip.png && rm /tmp/scrot_clip.png'
-bindsym --release Print exec scrot --select --line mode=edge -q 100 -s 'screenshot_%Y%m%d_%H%M%S.png' -e 'mkdir -p ~/Pictures/screenshots && mv $f ~/Pictures/screenshots && xclip -selection clipboard -t image/png -i ~/Pictures/screenshots/`ls -1 -t ~/Pictures/screenshots | head -1` && notify-send "Screenshot saved"' # All screens
+# Screenshots
+bindsym --release Print exec --no-startup-id ~/.config/i3/screenshot-ksnip.sh
+bindsym --release Shift+Print exec --no-startup-id ksnip -r
+bindsym --release $mod+Print exec --no-startup-id ~/.config/i3/screenshot-ksnip.sh -a
 
 #bindsym --release Print exec --no-startup-id bash -c 'maim ~/Pictures/screenshots/screenshot_$(date +%Y%m%d_%H%M%S).png && notify-send "Screenshot saved"'
 #bindsym --release Shift+Print exec --no-startup-id bash -c 'maim -s | xclip -selection clipboard -t image/png && notify-send "Selection copied to clipboard"'
 #bindsym --release $mod+Print exec --no-startup-id bash -c 'maim -s ~/Pictures/screenshots/screenshot_$(date +%Y%m%d_%H%M%S).png && notify-send "Selection saved"'
 #bindsym $mod+n exec i3-input -F 'rename workspace to "'`i3-msg -t get_workspaces | jq '.[] | select(.visible == true)' | jq .num`': %s"' -P "new name? "
-#exec_always --no-startup-id numlockx on
+exec_always --no-startup-id numlockx on
 #exec_always --no-startup-id compton
 
 # Pulse Audio controls
