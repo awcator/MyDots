@@ -1,0 +1,24 @@
+#!/bin/bash
+# Custom askpass that shows the full sudo command in the x11-ssh-askpass prompt
+
+# Read the command from the parent sudo process
+SUDO_CMD=$(cat /proc/$PPID/cmdline 2>/dev/null | tr '\0' ' ' | sed 's/^sudo *//')
+
+# Fallback if we couldn't read it
+if [ -z "$SUDO_CMD" ]; then
+    SUDO_CMD="(unknown command)"
+fi
+
+# Set the prompt shown in the x11-ssh-askpass dialog via X resources
+# The dialog title and label are controlled by these resources
+export XASKPASS_TITLE="sudo: ${SUDO_CMD}"
+export XASKPASS_LABEL="$1"
+
+# x11-ssh-askpass reads *.Dialog.label from X resources
+# We use xrdb to temporarily set them
+RESOURCES="*runningCommand: ${SUDO_CMD}
+ssh-askpass*Dialog.label: ${1:-Password:}\\nCommand: ${SUDO_CMD}"
+
+echo "$RESOURCES" | xrdb -merge 2>/dev/null
+
+exec /usr/lib/ssh/x11-ssh-askpass "$1 | cmd: $SUDO_CMD"
