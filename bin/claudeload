@@ -1,61 +1,131 @@
 #!/bin/bash
 # claudeload — switch Claude Code backend in current shell
 # Usage: source claudeload <profile> [model]
+#
+# Backends: copilot | windsurf | deepseek | antigravity | aistudio
+# Proxies run foreground in tmux session 'proxies' (spawned only if port is down).
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  Constants
+# ══════════════════════════════════════════════════════════════════════════════
 
 export CLAUDE_CODE_MAX_OUTPUT_TOKENS=128000
 
-# Absolute path to this script (for re-dispatching the interactive menu)
 _CLD_SELF="$(readlink -f "${BASH_SOURCE[0]}")"
 
-# Clear every ANTHROPIC_* var left over from a previous backend/session, so only
-# the backend chosen below sets auth + model. A stale ANTHROPIC_API_KEY sitting
-# next to a proxy's ANTHROPIC_AUTH_TOKEN is what triggers Claude Code's auth
-# warning ("auth may not work as expected"). Called at the top of each backend.
-_clear_anthropic() {
-  local _an
-  while IFS= read -r _an; do unset -v "$_an"; done < <(compgen -v 'ANTHROPIC_')
+# ANSI helpers (prefixed _CL_ to avoid clashing with .bashrc PS1 vars)
+_CL_B=$'\033[1m'  _CL_C=$'\033[36m'  _CL_G=$'\033[32m'
+_CL_Y=$'\033[33m' _CL_R=$'\033[31m'  _CL_D=$'\033[2m'  _CL_0=$'\033[0m'
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  Logging & Error Handling
+# ══════════════════════════════════════════════════════════════════════════════
+
+_cl_log()  { [[ -z "${CLAUDELOAD_QUIET:-}" ]] && echo "$@"; }
+_cl_warn() { [[ -z "${CLAUDELOAD_QUIET:-}" ]] && echo "$@" >&2; }
+_cl_die()  { echo "$*" >&2; return 1 2>/dev/null || exit 1; }
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  Environment Management
+# ══════════════════════════════════════════════════════════════════════════════
+
+# Clear every ANTHROPIC_* var from previous sessions.  A stale ANTHROPIC_API_KEY
+# sitting next to a proxy's ANTHROPIC_AUTH_TOKEN triggers the "auth may not work
+# as expected" warning in Claude Code.
+_cl_clear_env() {
+  local v
+  while IFS= read -r v; do unset -v "$v"; done < <(compgen -v 'ANTHROPIC_')
 }
 
-# ── foreground proxy management (tmux) ────────────────────────────────────
-# _proxy_port_up <port> → 0 if something is already listening there
-_proxy_port_up() {
+# Export the six model env vars Claude Code uses.
+#   _cl_export_models <base> [fast] [sonnet]
+# Defaults: fast → base, sonnet → base.
+_cl_export_models() {
+  local base="$1" fast="${2:-$1}" sonnet="${3:-$1}"
+  export ANTHROPIC_MODEL="$base"
+  export ANTHROPIC_DEFAULT_OPUS_MODEL="$base"
+  export ANTHROPIC_DEFAULT_SONNET_MODEL="$sonnet"
+  export ANTHROPIC_DEFAULT_HAIKU_MODEL="$fast"
+  export ANTHROPIC_SMALL_FAST_MODEL="$fast"
+  export CLAUDE_CODE_SUBAGENT_MODEL="$fast"
+}
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  Proxy Management (tmux)
+# ══════════════════════════════════════════════════════════════════════════════
+
+# _cl_port_up <port> → 0 if something is already listening
+_cl_port_up() {
   ss -ltn 2>/dev/null | awk '{print $4}' | \grep -qE "(^|:)$1$" && return 0
-  curl -sf -o /dev/null --max-time 1 "http://localhost:$1/v1/models" 2>/dev/null && return 0
-  return 1
+  curl -sf -o /dev/null --max-time 1 "http://localhost:$1/v1/models" 2>/dev/null
 }
 
-# _spawn_proxy <name> <port> <cmd...> — run <cmd> in a foreground tmux window
-# inside the 'proxies' session, unless the port is already up.
-_spawn_proxy() {
-  local _name="$1" _port="$2"; shift 2
-  if _proxy_port_up "$_port"; then
-    [[ -z "$CLAUDELOAD_QUIET" ]] && echo "$_name: already running on :$_port"
+# _cl_spawn_proxy <name> <port> <cmd...>
+# Run <cmd> in a foreground tmux window inside the 'proxies' session,
+# unless the port is already up.  Waits up to 30 s for the port.
+_cl_spawn_proxy() {
+  local name="$1" port="$2"; shift 2
+
+  if _cl_port_up "$port"; then
+    _cl_log "$name: already running on :$port"
     return 0
   fi
-  [[ -z "$CLAUDELOAD_QUIET" ]] && echo "$_name: starting on :$_port (foreground in a tmux window)…"
+
+  _cl_log "$name: starting on :$port (foreground in tmux window)…"
+
   if ! command -v tmux >/dev/null 2>&1; then
-    [[ -z "$CLAUDELOAD_QUIET" ]] && echo "$_name: tmux not found — running detached" >&2
+    _cl_warn "$name: tmux not found — running detached"
     "$@" >/dev/null 2>&1 &
-  elif [[ -n "$TMUX" ]]; then
-    # already inside tmux → new window/tab in the CURRENT session
-    tmux new-window -d -n "$_name" "$@"
+  elif [[ -n "${TMUX:-}" ]]; then
+    tmux new-window -d -n "$name" "$@"
   elif ! tmux has-session -t proxies 2>/dev/null; then
-    tmux new-session -d -s proxies -n "$_name" "$@"
+    tmux new-session -d -s proxies -n "$name" "$@"
   else
-    tmux new-window -d -t proxies -n "$_name" "$@"
+    tmux new-window -d -t proxies -n "$name" "$@"
   fi
-  # Wait for the port to come up (up to ~30s)
-  local _i
-  for _i in {1..30}; do
-    ss -ltn 2>/dev/null | awk '{print $4}' | \grep -qE "(^|:)$_port$" && return 0
+
+  local i
+  for i in {1..30}; do
+    _cl_port_up "$port" && return 0
     sleep 1
   done
-  [[ -z "$CLAUDELOAD_QUIET" ]] && echo "$_name: warning — :$_port not up after 30s" >&2
-  return 0
+  _cl_warn "$name: warning — :$port not up after 30 s"
 }
 
-# _vendor_of <selector> → lowercased vendor token (claude/gpt/gemini/glm/…)
-_vendor_of() {
+# ══════════════════════════════════════════════════════════════════════════════
+#  Data Helpers
+# ══════════════════════════════════════════════════════════════════════════════
+
+# Fetch JSON from a URL with optional Authorization header.
+_cl_fetch_json() {
+  local url="$1" auth="${2:-}"
+  if [[ -n "$auth" ]]; then
+    curl -sf "$url" -H "Authorization: Bearer $auth" 2>/dev/null
+  else
+    curl -sf "$url" 2>/dev/null
+  fi
+}
+
+# Run inline Python that reads JSON from $_CL_JSON env var and prints TSV.
+#   _cl_models_to_tsv <json> <python_code>
+# Extra env vars can be prepended by the caller (e.g. _CL_EXTRA="val" _cl_models_to_tsv ...).
+_cl_models_to_tsv() {
+  _CL_JSON="$1" python3 -c "$2"
+}
+
+# Natural-sort + pick the last match from a newline-separated list.
+#   _cl_derive_fast <model_list> <grep_pattern> [exclude_pattern]
+_cl_derive_fast() {
+  local models="$1" pattern="$2" exclude="${3:-}"
+  if [[ -n "$exclude" ]]; then
+    printf '%s\n' $models | \grep -iE "$pattern" | \grep -viE "$exclude" | sort -V | tail -1
+  else
+    printf '%s\n' $models | \grep -iE "$pattern" | sort -V | tail -1
+  fi
+}
+
+# Lowercased vendor token from a model id (claude/gpt/gemini/…).
+_cl_vendor_of() {
   local s="${1,,}" v
   s="${s//_/-}"
   for v in claude gpt gemini glm deepseek grok kimi nemotron swe inkling mai qwen; do
@@ -64,48 +134,388 @@ _vendor_of() {
   echo "${s%%[-0-9]*}"
 }
 
-# ── colored model picker ───────────────────────────────────────────────────
-# Menu colors (prefixed _CL to avoid clashing with .bashrc PS1 vars)
-_CL_B=$'\033[1m'; _CL_C=$'\033[36m'; _CL_G=$'\033[32m'
-_CL_Y=$'\033[33m'; _CL_R=$'\033[31m'; _CL_D=$'\033[2m'; _CL_0=$'\033[0m'
+# ══════════════════════════════════════════════════════════════════════════════
+#  Interactive Model Picker
+# ══════════════════════════════════════════════════════════════════════════════
 
-# _pick "<title>" "<tsv>" — print a colored numbered table (to stderr), read a
-# choice from the terminal, and echo the chosen id (to stdout). TSV columns:
-#   id <TAB> label <TAB> status        (label/status may be empty)
-# Returns 1 if the user quits (no id echoed).
-_pick() {
-  local _title="$1" _tsv="$2" _id _lab _st
-  local _ids=() _labs=() _sts=()
-  while IFS=$'\t' read -r _id _lab _st; do
-    [[ -z "$_id" ]] && continue
-    _ids+=("$_id"); _labs+=("$_lab"); _sts+=("$_st")
-  done <<< "$_tsv"
+# _cl_pick "<title>" "<tsv>"
+# Print a colored numbered table to stderr, read a choice from the terminal,
+# echo the chosen id to stdout.  TSV columns: id <TAB> label <TAB> status.
+# Returns 1 if the user quits.
+_cl_pick() {
+  local title="$1" tsv="$2"
+  local ids=() labs=() sts=()
+  local id lab st
+  while IFS=$'\t' read -r id lab st; do
+    [[ -z "$id" ]] && continue
+    ids+=("$id"); labs+=("$lab"); sts+=("$st")
+  done <<< "$tsv"
 
-  local _n=${#_ids[@]} _i _mark
-  (( _n == 0 )) && return 1
+  local n=${#ids[@]}
+  (( n == 0 )) && return 1
 
-  printf '%b\n%b\n' "${_CL_B}${_title}${_CL_0}" "${_CL_D}  ${_n} models${_CL_0}" >&2
-  for ((_i=0; _i<_n; _i++)); do
-    _mark=""
-    if [[ -n "${_sts[$_i]}" ]]; then
-      _mark="  ${_CL_R}⚠ ${_sts[$_i]}${_CL_0}"
-    fi
-    printf '%b' "${_CL_C}  $((_i+1))${_CL_0}) " >&2
-    printf "${_CL_B}%-30s${_CL_0}  %s%s\n" "${_ids[$_i]}" "${_labs[$_i]}" "$_mark" >&2
+  printf '%b\n%b\n' "${_CL_B}${title}${_CL_0}" \
+                     "${_CL_D}  ${n} models${_CL_0}" >&2
+  local i mark
+  for ((i=0; i<n; i++)); do
+    mark=""
+    [[ -n "${sts[$i]}" ]] && mark="  ${_CL_R}⚠ ${sts[$i]}${_CL_0}"
+    printf '%b%-4s%b%-30s%b  %s%s\n' \
+      "${_CL_C}  " "$((i+1)))" "${_CL_B}" "${ids[$i]}" "${_CL_0}" \
+      "${labs[$i]}" "$mark" >&2
   done
 
-  local _sel
+  local sel
   while :; do
-    printf '%b' "${_CL_B}  pick (1-${_n}, q to quit): ${_CL_0}" >&2
-    read -r _sel
-    if [[ "$_sel" == "q" || "$_sel" == "Q" ]]; then return 1; fi
-    if [[ "$_sel" =~ ^[0-9]+$ ]] && (( _sel >= 1 && _sel <= _n )); then
-      printf '%s' "${_ids[$((_sel-1))]}"
+    printf '%b' "${_CL_B}  pick (1-${n}, q to quit): ${_CL_0}" >&2
+    read -r sel
+    [[ "$sel" == [qQ] ]] && return 1
+    if [[ "$sel" =~ ^[0-9]+$ ]] && (( sel >= 1 && sel <= n )); then
+      printf '%s' "${ids[$((sel-1))]}"
       return 0
     fi
     printf '%b\n' "${_CL_R}  invalid choice${_CL_0}" >&2
   done
 }
+
+# _cl_select_model "<title>" "<tsv>" [override]
+# If override is non-empty, echo it; otherwise run _cl_pick.
+_cl_select_model() {
+  local title="$1" tsv="$2" override="${3:-}"
+  if [[ -n "$override" ]]; then
+    printf '%s' "$override"
+    return 0
+  fi
+  _cl_pick "$title" "$tsv" || { echo "  cancelled" >&2; return 1; }
+}
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  Shared Python: natural-sort TSV rows
+# ══════════════════════════════════════════════════════════════════════════════
+# Every backend's Python TSV builder needs the same nkey() sort.  This variable
+# holds the shared fragment so we define it once.
+_CL_PY_SORT='
+import re
+def _nkey(r):
+    return [int(t) if t.isdigit() else t.lower() for t in re.split(r"(\d+)", r[0])]
+'
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  Backend: Copilot  (port 4141, copilot-api)
+# ══════════════════════════════════════════════════════════════════════════════
+
+_cl_backend_copilot() {
+  local model_override="${1:-}"
+
+  _cl_clear_env
+  export ANTHROPIC_BASE_URL=http://localhost:4141
+  export ANTHROPIC_AUTH_TOKEN=dummy
+
+  _cl_spawn_proxy copilot 4141 \
+    npx -y copilot-api@latest start --account-type business
+
+  # Fetch live model list from the proxy (no hardcoded fallback)
+  local all
+  all="$(\grep -o '"id":"[^"]*"' <<< "$(_cl_fetch_json http://localhost:4141/v1/models)" \
+        | cut -d'"' -f4 | sort -u -V)"
+  if [[ -z "$all" ]]; then
+    _cl_die "copilot: couldn't fetch models from :4141 (is copilot-api running?)"
+    return 1
+  fi
+
+  local base="$model_override"
+  if [[ -z "$base" ]]; then
+    echo "Pick a base model (Copilot, :4141):"
+    PS3="  model> "
+    select base in $all; do [[ -n "$base" ]] && break; done
+  fi
+
+  # Dynamically derive sonnet (mid-tier) and fast (lightest) from same vendor
+  local vendor sonnet fast
+  vendor="$(_cl_vendor_of "$base")"
+  # Mid-tier: same vendor, prefer "sonnet" variant, else largest capable non-base
+  sonnet="$(_cl_derive_fast "$all" "^${vendor}.*sonnet")"
+  [[ -z "$sonnet" ]] && sonnet="$(printf '%s\n' $all \
+    | \grep -iE "^${vendor}" \
+    | \grep -viE 'mini|lite|haiku|flash|embed|compaction|trajectory|codex|copilot' \
+    | \grep -v "$base" | sort -V | tail -1)"
+  # Fast: same vendor, prefer mini/haiku/flash/lite variant
+  fast="$(_cl_derive_fast "$all" "^${vendor}.*(mini|haiku|flash|lite)")"
+  [[ -z "$fast" ]] && fast="$(printf '%s\n' $all \
+    | \grep -iE "^${vendor}" | sort -V | head -1)"
+  : "${sonnet:=$base}" "${fast:=$base}"
+
+  _cl_export_models "$base" "$fast" "$sonnet"
+  _cl_log "Loaded: $ANTHROPIC_MODEL (copilot, :4141)" \
+          "— sonnet: $ANTHROPIC_DEFAULT_SONNET_MODEL," \
+          "haiku: $ANTHROPIC_SMALL_FAST_MODEL"
+}
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  Backend: Windsurf  (port 4142, WindsurfAPI / Docker)
+# ══════════════════════════════════════════════════════════════════════════════
+
+_cl_backend_windsurf() {
+  local model_override="${1:-}"
+
+  _cl_clear_env
+  export ANTHROPIC_BASE_URL=http://localhost:4142
+  export ANTHROPIC_AUTH_TOKEN=dummy
+
+  _cl_spawn_proxy windsurf 4142 \
+    bash -c 'cd /home/awcator/Documents/WindsurfAPI && exec docker compose up'
+
+  if ! command -v claudecredits >/dev/null 2>&1; then
+    _cl_die "windsurf: claudecredits not found — add MyDots/bin to PATH"
+    return 1
+  fi
+
+  # Show the full catalog + live credit/pricing table
+  claudecredits
+  echo ""
+
+  local base="$model_override"
+  if [[ -z "$base" ]]; then
+    local models
+    mapfile -t models < <(claudecredits --raw 2>/dev/null | \grep $'\t' | cut -f1)
+    if [[ ${#models[@]} -eq 0 ]]; then
+      _cl_die "windsurf: couldn't fetch model catalog"
+      return 1
+    fi
+    echo "Pick a base model (selector from the table above):"
+    PS3="  model> "
+    select base in "${models[@]}"; do [[ -n "$base" ]] && break; done
+  fi
+
+  # Cheapest same-vendor model for the haiku/fast slot
+  local vendor fast
+  vendor="$(_cl_vendor_of "$base")"
+  fast="$(claudecredits --raw 2>/dev/null | \grep $'\t' \
+    | awk -F'\t' -v v="$vendor" 'index(tolower($1), v) > 0 { print $2 "\t" $1 }' \
+    | sort -n | head -1 | cut -f2-)"
+  : "${fast:=$base}"
+
+  _cl_export_models "$base" "$fast"
+  _cl_log "Loaded: $ANTHROPIC_MODEL (windsurf, :4142)" \
+          "— haiku/mini: $ANTHROPIC_SMALL_FAST_MODEL"
+}
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  Backend: DeepSeek  (api.deepseek.com, direct API)
+# ══════════════════════════════════════════════════════════════════════════════
+
+_cl_backend_deepseek() {
+  local model_override="${1:-}"
+
+  _cl_clear_env
+  export ANTHROPIC_BASE_URL=https://api.deepseek.com/anthropic
+  export ANTHROPIC_API_KEY="${DEEPSEEK_KEY:-}"
+
+  local models_json
+  models_json="$(_cl_fetch_json "https://api.deepseek.com/models" "$ANTHROPIC_API_KEY")"
+  if [[ -z "$models_json" ]]; then
+    _cl_die "deepseek: couldn't fetch models from API (is DEEPSEEK_KEY set?)"
+    return 1
+  fi
+
+  local tsv
+  tsv="$(_cl_models_to_tsv "$models_json" "${_CL_PY_SORT}"'
+import json, os
+models = json.loads(os.environ["_CL_JSON"])
+rows = []
+for m in models.get("data", []):
+    mid = m.get("id", "")
+    desc = "DeepSeek Reasoning Model" if "pro" in mid or "reasoner" in mid else "DeepSeek Standard Model"
+    rows.append((mid, desc, ""))
+rows.sort(key=_nkey)
+for mid, desc, status in rows:
+    print("%s\t%s\t%s" % (mid, desc, status))
+')"
+
+  local base
+  base="$(_cl_select_model "DeepSeek models (api.deepseek.com)" "$tsv" "$model_override")" \
+    || return 1
+
+  local fast
+  fast="$(echo "$tsv" | cut -f1 | \grep -i flash | head -1)"
+  : "${fast:=$base}"
+
+  _cl_export_models "$base" "$fast"
+  export CLAUDE_CODE_EFFORT_LEVEL=low
+
+  # Show remaining API balance
+  local bal
+  bal="$(_cl_fetch_json "https://api.deepseek.com/user/balance" "$ANTHROPIC_API_KEY" \
+    | \grep -o '"total_balance":"[^"]*"' | cut -d'"' -f4)"
+  [[ -n "$bal" ]] && _cl_log "Balance: \$$bal (deepseek)"
+  _cl_log "Loaded: $ANTHROPIC_MODEL (api.deepseek.com)" \
+          "— fast/subagent: $CLAUDE_CODE_SUBAGENT_MODEL"
+}
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  Backend: Antigravity  (port 9080, acc proxy)
+# ══════════════════════════════════════════════════════════════════════════════
+
+_cl_backend_antigravity() {
+  local model_override="${1:-}"
+
+  _cl_clear_env
+  export ANTHROPIC_BASE_URL=http://localhost:9080
+  export ANTHROPIC_AUTH_TOKEN=test
+
+  _cl_spawn_proxy antigravity 9080 env PORT=9080 acc start --log
+
+  local models_json accounts_json
+  models_json="$(_cl_fetch_json "http://localhost:9080/v1/models")"
+  accounts_json="$(_cl_fetch_json "http://localhost:9080/api/accounts")"
+
+  if [[ -z "$models_json" ]]; then
+    _cl_die "antigravity: couldn't fetch models from $ANTHROPIC_BASE_URL (is the proxy + account working?)"
+    return 1
+  fi
+
+  local all
+  all="$(\grep -o '"id":"[^"]*"' <<< "$models_json" | cut -d'"' -f4 | sort -u -V)"
+
+  local base="$model_override"
+  if [[ -z "$base" ]]; then
+    # Build TSV with rate-limit warnings from account data
+    local tsv
+    tsv="$(_CL_ACCOUNTS="$accounts_json" _cl_models_to_tsv "$models_json" "${_CL_PY_SORT}"'
+import json, os, time
+models = json.loads(os.environ["_CL_JSON"])
+accounts = json.loads(os.environ.get("_CL_ACCOUNTS") or "{}")
+rl = {}
+for a in accounts.get("accounts", []):
+    for m, r in (a.get("modelRateLimits") or {}).items():
+        if r.get("isRateLimited"):
+            wait = int((r.get("resetTime", 0) / 1000) - time.time())
+            rl[m] = max(0, wait // 60)
+seen, rows = set(), []
+for m in models.get("data", []):
+    mid = m.get("id", "")
+    if mid in seen: continue
+    seen.add(mid)
+    desc = m.get("description", "") or ""
+    status = ("rate-limited ~%dm" % rl[mid]) if mid in rl else ""
+    rows.append((mid, desc, status))
+rows.sort(key=_nkey)
+for mid, desc, status in rows:
+    print("%s\t%s\t%s" % (mid, desc, status))
+')"
+
+    # Print account summary
+    if [[ -z "${CLAUDELOAD_QUIET:-}" && -n "$accounts_json" ]]; then
+      python3 -c 'import json,sys
+try: d=json.load(sys.stdin)
+except Exception: sys.exit(0)
+s=d.get("summary",{})
+print("  accounts: %d/%d available, %d rate-limited" % (s.get("available",0), s.get("total",0), s.get("rateLimited",0)))
+' <<< "$accounts_json"
+    fi
+
+    base="$(_cl_pick "Antigravity models (:9080)" "$tsv")" \
+      || { echo "  cancelled" >&2; return 1; }
+  fi
+
+  # Derive fast/subagent companion — same vendor, cheapest capable tier
+  local vendor fast
+  vendor="$(_cl_vendor_of "$base")"
+  # 1. Cheapest capable tier: haiku or mini
+  fast="$(_cl_derive_fast "$all" "^${vendor}.*(haiku|mini)" \
+         'image|embed|compaction|trajectory')"
+  # 2. Flash tier (excluding specialty variants)
+  [[ -z "$fast" ]] && fast="$(_cl_derive_fast "$all" "^${vendor}.*flash" \
+         'high|pro|thinking|image|agent|medium|tiered|embed|lite')"
+  # 3. Sonnet / mid-tier (e.g. Claude on antigravity has only opus+sonnet)
+  [[ -z "$fast" ]] && fast="$(_cl_derive_fast "$all" "^${vendor}.*sonnet")"
+  : "${fast:=$base}"
+
+  _cl_export_models "$base" "$fast"
+  _cl_log "Loaded: $ANTHROPIC_MODEL (antigravity, :9080)" \
+          "— fast/subagent: $ANTHROPIC_SMALL_FAST_MODEL"
+}
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  Backend: AI Studio  (port 9083, litellm proxy)
+# ══════════════════════════════════════════════════════════════════════════════
+
+_cl_backend_aistudio() {
+  local model_override="${1:-}"
+
+  _cl_clear_env
+
+  if [[ -z "${GEMINI_API_KEY:-}" ]]; then
+    _cl_die "aistudio: GEMINI_API_KEY not found in env"
+    return 1
+  fi
+
+  # Ensure litellm is on PATH
+  command -v litellm >/dev/null 2>&1 || export PATH="$PATH:$HOME/.local/bin"
+  if ! command -v litellm >/dev/null 2>&1; then
+    _cl_die "aistudio: litellm not found! Install via: uv tool install 'litellm[proxy]'"
+    return 1
+  fi
+
+  local models_json
+  models_json="$(_cl_fetch_json \
+    "https://generativelanguage.googleapis.com/v1beta/models?key=$GEMINI_API_KEY")"
+  if [[ -z "$models_json" ]]; then
+    _cl_die "aistudio: couldn't fetch models from API (is GEMINI_API_KEY valid?)"
+    return 1
+  fi
+
+  # Generate litellm config from the live model catalog
+  local config="/tmp/claudeload_aistudio_litellm.yaml"
+  python3 -c '
+import json, sys
+models = json.load(sys.stdin).get("models", [])
+print("model_list:")
+for m in models:
+    name = m.get("name", "").replace("models/", "")
+    print(f"  - model_name: {name}")
+    print(f"    litellm_params:")
+    print(f"      model: gemini/{name}")
+    print(f"      api_key: os.environ/GEMINI_API_KEY")
+' <<< "$models_json" > "$config"
+
+  export ANTHROPIC_BASE_URL=http://localhost:9083
+  export ANTHROPIC_API_KEY=dummy
+  _cl_spawn_proxy aistudio 9083 litellm --config "$config" --port 9083
+
+  local tsv
+  tsv="$(_cl_models_to_tsv "$models_json" "${_CL_PY_SORT}"'
+import json, os
+models = json.loads(os.environ["_CL_JSON"]).get("models", [])
+rows = []
+for m in models:
+    mid = m.get("name", "").replace("models/", "")
+    desc = m.get("displayName", "")
+    if "generateContent" not in m.get("supportedGenerationMethods", []):
+        continue
+    rows.append((mid, desc, ""))
+rows.sort(key=_nkey)
+for mid, desc, status in rows:
+    print("%s\t%s\t%s" % (mid, desc, status))
+')"
+
+  local base
+  base="$(_cl_select_model "Google AI Studio models (:9083)" "$tsv" "$model_override")" \
+    || return 1
+
+  local fast
+  fast="$(echo "$tsv" | cut -f1 \
+    | \grep -i flash | \grep -viE 'preview|lite|tts|image|transcribe|omni|latest|robotics' | tail -1)"
+  : "${fast:=$base}"
+
+  _cl_export_models "$base" "$fast"
+  _cl_log "Loaded: $ANTHROPIC_MODEL (aistudio, :9083)" \
+          "— fast/subagent: $ANTHROPIC_SMALL_FAST_MODEL"
+}
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  Main Dispatch
+# ══════════════════════════════════════════════════════════════════════════════
 
 case "${1:-}" in
   ""|menu|m)
@@ -116,344 +526,41 @@ case "${1:-}" in
     done
     source "$_CLD_SELF" "$_prof"
     ;;
-  copilot|cop|opus)
-    _clear_anthropic
-    export ANTHROPIC_BASE_URL=http://localhost:4141
-    export ANTHROPIC_AUTH_TOKEN=dummy
-    _spawn_proxy copilot 4141 npx -y copilot-api@latest start --account-type business
 
-    # Live model list (fall back to a known-good curated list)
-    _cp_all="$(curl -sf http://localhost:4141/v1/models 2>/dev/null \
-      | \grep -o '"id":"[^"]*"' | cut -d'"' -f4 | sort -u -V)"
-    if [[ -z "$_cp_all" ]]; then
-      _cp_all='claude-opus-5
-claude-opus-4.8
-claude-opus-4.7
-claude-opus-4.6
-claude-sonnet-5
-claude-sonnet-4.6
-claude-haiku-4.5
-gpt-5.5
-gpt-5.4
-gpt-5.4-mini
-gpt-5.3-codex
-gpt-5.6-terra
-gpt-5.6-sol
-gpt-5.6-luna'
-    fi
+  copilot|cop|opus)    _cl_backend_copilot   "${2:-}" ;;
+  windsurf|ws)         _cl_backend_windsurf  "${2:-}" ;;
+  deepseek)            _cl_backend_deepseek  "${2:-}" ;;
+  antigravity|ag)      _cl_backend_antigravity "${2:-}" ;;
+  aistudio|ai)         _cl_backend_aistudio  "${2:-}" ;;
 
-    _cp_base="${2:-}"
-    if [[ -z "$_cp_base" ]]; then
-      echo "Pick a base model (Copilot, :4141):"
-      PS3="  model> "
-      select _cp_base in $_cp_all; do
-        [[ -n "$_cp_base" ]] && break
-      done
-    fi
-
-    case "$_cp_base" in
-      claude-*)
-        _cp_sonnet="$(printf '%s\n' $_cp_all | \grep '^claude-sonnet' | sort -V | tail -1)"
-        _cp_fast="$(printf '%s\n' $_cp_all | \grep '^claude-haiku' | sort -V | tail -1)"
-        ;;
-      gpt-*)
-        _cp_sonnet="$(printf '%s\n' $_cp_all | \grep -E '^gpt-5' | \grep -v mini | sort -V | tail -1)"
-        _cp_fast="$(printf '%s\n' $_cp_all | \grep -E 'gpt-4o-mini|gpt-4\.1|gpt-4-mini' | sort -V | tail -1)"
-        ;;
-      *) _cp_sonnet="$_cp_base"; _cp_fast="$_cp_base" ;;
-    esac
-    [[ -z "$_cp_sonnet" ]] && _cp_sonnet="$_cp_base"
-    [[ -z "$_cp_fast" ]] && _cp_fast="$_cp_base"
-
-    export ANTHROPIC_MODEL="$_cp_base"
-    export ANTHROPIC_DEFAULT_OPUS_MODEL="$_cp_base"
-    export ANTHROPIC_DEFAULT_SONNET_MODEL="$_cp_sonnet"
-    export ANTHROPIC_DEFAULT_HAIKU_MODEL="$_cp_fast"
-    export ANTHROPIC_SMALL_FAST_MODEL="$_cp_fast"
-    export CLAUDE_CODE_SUBAGENT_MODEL="$_cp_fast"
-    unset _cp_base _cp_sonnet _cp_fast _cp_all
-    [[ -z "$CLAUDELOAD_QUIET" ]] && echo "Loaded: $ANTHROPIC_MODEL (copilot, :4141) — sonnet: $ANTHROPIC_DEFAULT_SONNET_MODEL, haiku: $ANTHROPIC_SMALL_FAST_MODEL"
-    ;;
-  windsurf|ws)
-    _clear_anthropic
-    export ANTHROPIC_BASE_URL=http://localhost:4142
-    export ANTHROPIC_AUTH_TOKEN=dummy
-    _spawn_proxy windsurf 4142 bash -c 'cd /home/awcator/Documents/WindsurfAPI && exec docker compose up'
-
-    if ! command -v claudecredits >/dev/null 2>&1; then
-      echo "windsurf: claudecredits not found — add MyDots/bin to PATH" >&2
-      return 1 2>/dev/null || exit 1
-    fi
-
-    # Show the full catalog + live credit table (all model details)
-    claudecredits
-    echo ""
-
-    _ws_base="${2:-}"
-    if [[ -z "$_ws_base" ]]; then
-      mapfile -t _ws_models < <(claudecredits --raw 2>/dev/null | \grep $'\t' | cut -f1)
-      if [[ ${#_ws_models[@]} -eq 0 ]]; then
-        echo "windsurf: couldn't fetch model catalog" >&2
-        return 1 2>/dev/null || exit 1
-      fi
-      echo "Pick a base model (selector from the table above):"
-      PS3="  model> "
-      select _ws_base in "${_ws_models[@]}"; do
-        [[ -n "$_ws_base" ]] && break
-      done
-    fi
-
-    # Derive cheapest same-family model for the haiku/mini/subagent slot
-    _ws_vendor="$(_vendor_of "$_ws_base")"
-    _ws_fast="$(claudecredits --raw 2>/dev/null | \grep $'\t' | awk -F'\t' -v v="$_ws_vendor" \
-      'index(tolower($1), v) > 0 { print $2 "\t" $1 }' | sort -n | head -1 | cut -f2-)"
-    [[ -z "$_ws_fast" ]] && _ws_fast="$_ws_base"
-
-    export ANTHROPIC_MODEL="$_ws_base"
-    export ANTHROPIC_DEFAULT_OPUS_MODEL="$_ws_base"
-    export ANTHROPIC_DEFAULT_SONNET_MODEL="$_ws_base"
-    export ANTHROPIC_DEFAULT_HAIKU_MODEL="$_ws_fast"
-    export ANTHROPIC_SMALL_FAST_MODEL="$_ws_fast"
-    export CLAUDE_CODE_SUBAGENT_MODEL="$_ws_fast"
-    unset _ws_base _ws_fast _ws_models _ws_vendor
-    [[ -z "$CLAUDELOAD_QUIET" ]] && echo "Loaded: $ANTHROPIC_MODEL (windsurf, :4142) — haiku/mini: $ANTHROPIC_SMALL_FAST_MODEL"
-    ;;
-  deepseek)
-    _clear_anthropic
-    export ANTHROPIC_BASE_URL=https://api.deepseek.com/anthropic
-    export ANTHROPIC_API_KEY=$DEEPSEEK_KEY
-
-    # Fetch the live model list from DeepSeek API
-    _ds_models_json="$(curl -sf https://api.deepseek.com/models -H "Authorization: Bearer $ANTHROPIC_API_KEY" 2>/dev/null)"
-
-    if [[ -z "$_ds_models_json" ]]; then
-      echo "deepseek: couldn't fetch models from API (is DEEPSEEK_KEY set?)" >&2
-      return 1 2>/dev/null || exit 1
-    fi
-
-    # Build TSV for _pick
-    _ds_tsv="$(_DS_MODELS_JSON="$_ds_models_json" python3 -c '
-import json, os, re
-try:
-    models = json.loads(os.environ["_DS_MODELS_JSON"])
-    rows = []
-    for m in models.get("data", []):
-        mid = m.get("id", "")
-        # Add a custom description
-        desc = "DeepSeek Reasoning Model" if "pro" in mid or "reasoner" in mid else "DeepSeek Standard Model"
-        rows.append((mid, desc, ""))
-    def nkey(r):
-        return [int(t) if t.isdigit() else t.lower() for t in re.split(r"(\d+)", r[0])]
-    rows.sort(key=nkey)
-    for mid, desc, status in rows:
-        print("%s\t%s\t%s" % (mid, desc, status))
-except Exception:
-    pass
-')"
-
-    _ds_base="${2:-}"
-    if [[ -z "$_ds_base" ]]; then
-      _ds_base="$(_pick "DeepSeek models (api.deepseek.com)" "$_ds_tsv")" \
-        || { echo "  cancelled" >&2; return 1 2>/dev/null || exit 1; }
-    fi
-
-    _ds_fast="$(echo "$_ds_tsv" | cut -f1 | \grep -i flash | head -1)"
-    [[ -z "$_ds_fast" ]] && _ds_fast="$_ds_base"
-
-    export ANTHROPIC_MODEL="$_ds_base"
-    export ANTHROPIC_DEFAULT_OPUS_MODEL="$_ds_base"
-    export ANTHROPIC_DEFAULT_SONNET_MODEL="$_ds_base"
-    export ANTHROPIC_DEFAULT_HAIKU_MODEL="$_ds_fast"
-    export CLAUDE_CODE_SUBAGENT_MODEL="$_ds_fast"
-    export CLAUDE_CODE_EFFORT_LEVEL=low
-
-    # Remaining API balance (USD)
-    _ds_bal="$(curl -sf https://api.deepseek.com/user/balance \
-      -H "Authorization: Bearer $ANTHROPIC_API_KEY" 2>/dev/null \
-      | \grep -o '"total_balance":"[^"]*"' | cut -d'"' -f4)"
-    [[ -z "$CLAUDELOAD_QUIET" && -n "$_ds_bal" ]] && echo "Balance: \$$_ds_bal (deepseek)"
-    [[ -z "$CLAUDELOAD_QUIET" ]] && echo "Loaded: $ANTHROPIC_MODEL (api.deepseek.com) — fast/subagent: $CLAUDE_CODE_SUBAGENT_MODEL"
-    unset _ds_bal _ds_models_json _ds_tsv _ds_base _ds_fast
-    ;;
-  antigravity|ag)
-    _clear_anthropic
-    export ANTHROPIC_BASE_URL=http://localhost:9080
-    export ANTHROPIC_AUTH_TOKEN=test
-    _spawn_proxy antigravity 9080 env PORT=9080 acc start --log
-
-    # Fetch the live model list + account state from the API (nothing hardcoded)
-    _ag_models_json="$(curl -sf http://localhost:9080/v1/models 2>/dev/null)"
-    _ag_accounts_json="$(curl -sf http://localhost:9080/api/accounts 2>/dev/null)"
-    if [[ -z "$_ag_models_json" ]]; then
-      echo "antigravity: couldn't fetch models from $ANTHROPIC_BASE_URL (is the proxy + account working?)" >&2
-      return 1 2>/dev/null || exit 1
-    fi
-
-    # space-separated id list (used for fast/subagent derivation below)
-    _ag_all="$(printf '%s' "$_ag_models_json" | \grep -o '"id":"[^"]*"' | cut -d'"' -f4 | sort -u -V)"
-
-    _ag_base="${2:-}"
-    if [[ -z "$_ag_base" ]]; then
-      # Build a colored table: id / description / rate-limit status.
-      # Antigravity runs free Google tiers, so there's no per-model price.
-      _ag_tsv="$(_AG_MODELS_JSON="$_ag_models_json" _AG_ACCOUNTS_JSON="$_ag_accounts_json" python3 -c '
-import json, os, time, re
-models = json.loads(os.environ["_AG_MODELS_JSON"])
-accounts = json.loads(os.environ.get("_AG_ACCOUNTS_JSON") or "{}")
-rl = {}
-for a in accounts.get("accounts", []):
-    for m, r in (a.get("modelRateLimits") or {}).items():
-        if r.get("isRateLimited"):
-            wait = int((r.get("resetTime", 0) / 1000) - time.time())
-            rl[m] = max(0, wait // 60)
-seen, rows = set(), []
-for m in models.get("data", []):
-    mid = m.get("id", "")
-    if mid in seen:
-        continue
-    seen.add(mid)
-    desc = m.get("description", "") or ""
-    status = ("rate-limited ~%dm" % rl[mid]) if mid in rl else ""
-    rows.append((mid, desc, status))
-def nkey(r):
-    return [int(t) if t.isdigit() else t.lower() for t in re.split(r"(\d+)", r[0])]
-rows.sort(key=nkey)
-for mid, desc, status in rows:
-    print("%s\t%s\t%s" % (mid, desc, status))
-')"
-
-      if [[ -z "$CLAUDELOAD_QUIET" ]]; then
-        printf '%s' "$_ag_accounts_json" | python3 -c 'import json,sys
-try: d=json.load(sys.stdin)
-except Exception: sys.exit(0)
-s=d.get("summary",{})
-print("  accounts: %d/%d available, %d rate-limited" % (s.get("available",0), s.get("total",0), s.get("rateLimited",0)))
-'
-      fi
-
-      _ag_base="$(_pick "Antigravity models (:9080)" "$_ag_tsv")" \
-        || { echo "  cancelled" >&2; return 1 2>/dev/null || exit 1; }
-    fi
-
-    # Derive fast/subagent companion (same family, lightest tier)
-    if [[ "$_ag_base" == *claude* ]]; then
-      _ag_fast="$(printf '%s\n' $_ag_all | \grep -E '^claude.*(sonnet|haiku)' | sort -V | tail -1)"
-    else
-      _ag_fast="$(printf '%s\n' $_ag_all | \grep -E '^gemini' | \grep -i 'flash' \
-        | \grep -viE 'high|pro|thinking|image|agent|medium|tiered' | sort -V | tail -1)"
-    fi
-    [[ -z "$_ag_fast" ]] && _ag_fast="$_ag_base"
-
-    export ANTHROPIC_MODEL="$_ag_base"
-    export ANTHROPIC_DEFAULT_OPUS_MODEL="$_ag_base"
-    export ANTHROPIC_DEFAULT_SONNET_MODEL="$_ag_base"
-    export ANTHROPIC_DEFAULT_HAIKU_MODEL="$_ag_fast"
-    export ANTHROPIC_SMALL_FAST_MODEL="$_ag_fast"
-    export CLAUDE_CODE_SUBAGENT_MODEL="$_ag_fast"
-    unset _ag_base _ag_fast _ag_all _ag_tsv _ag_models_json _ag_accounts_json
-    [[ -z "$CLAUDELOAD_QUIET" ]] && echo "Loaded: $ANTHROPIC_MODEL (antigravity, :9080) — fast/subagent: $ANTHROPIC_SMALL_FAST_MODEL"
-    ;;
-  aistudio|ai)
-    _clear_anthropic
-    if [[ -z "$GEMINI_API_KEY" ]]; then
-      echo "aistudio: GEMINI_API_KEY not found in env" >&2
-      return 1 2>/dev/null || exit 1
-    fi
-
-    if ! command -v litellm >/dev/null 2>&1; then
-      export PATH="$PATH:$HOME/.local/bin"
-    fi
-    if ! command -v litellm >/dev/null 2>&1; then
-      echo "aistudio: litellm not found! Install via: uv tool install 'litellm[proxy]'" >&2
-      return 1 2>/dev/null || exit 1
-    fi
-
-    _ai_models_json="$(curl -sf "https://generativelanguage.googleapis.com/v1beta/models?key=$GEMINI_API_KEY" 2>/dev/null)"
-    if [[ -z "$_ai_models_json" ]]; then
-      echo "aistudio: couldn't fetch models from API (is GEMINI_API_KEY valid?)" >&2
-      return 1 2>/dev/null || exit 1
-    fi
-
-    _ai_config="/tmp/claudeload_aistudio_litellm.yaml"
-    printf "%s" "$_ai_models_json" | python3 -c '
-import json, sys
-models = json.load(sys.stdin).get("models", [])
-print("model_list:")
-for m in models:
-    name = m.get("name", "").replace("models/", "")
-    print(f"  - model_name: {name}")
-    print(f"    litellm_params:")
-    print(f"      model: gemini/{name}")
-    print(f"      api_key: os.environ/GEMINI_API_KEY")
-' > "$_ai_config"
-
-    export ANTHROPIC_BASE_URL=http://localhost:9083
-    export ANTHROPIC_API_KEY=dummy
-    _spawn_proxy aistudio 9083 litellm --config "$_ai_config" --port 9083
-
-    _ai_tsv="$(_AI_MODELS_JSON="$_ai_models_json" python3 -c '
-import json, os, re
-try:
-    models = json.loads(os.environ["_AI_MODELS_JSON"]).get("models", [])
-    rows = []
-    for m in models:
-        mid = m.get("name", "").replace("models/", "")
-        desc = m.get("displayName", "")
-        if "generateContent" not in m.get("supportedGenerationMethods", []):
-            continue
-        rows.append((mid, desc, ""))
-    def nkey(r):
-        return [int(t) if t.isdigit() else t.lower() for t in re.split(r"(\d+)", r[0])]
-    rows.sort(key=nkey)
-    for mid, desc, status in rows:
-        print("%s\t%s\t%s" % (mid, desc, status))
-except Exception:
-    pass
-')"
-
-    _ai_base="${2:-}"
-    if [[ -z "$_ai_base" ]]; then
-      _ai_base="$(_pick "Google AI Studio models (:9083)" "$_ai_tsv")" \
-        || { echo "  cancelled" >&2; return 1 2>/dev/null || exit 1; }
-    fi
-
-    _ai_fast="$(echo "$_ai_tsv" | cut -f1 | \grep -i flash | \grep -viE 'preview|lite|tts|image|transcribe' | tail -1)"
-    [[ -z "$_ai_fast" ]] && _ai_fast="$_ai_base"
-
-    export ANTHROPIC_MODEL="$_ai_base"
-    export ANTHROPIC_DEFAULT_OPUS_MODEL="$_ai_base"
-    export ANTHROPIC_DEFAULT_SONNET_MODEL="$_ai_base"
-    export ANTHROPIC_DEFAULT_HAIKU_MODEL="$_ai_fast"
-    export ANTHROPIC_SMALL_FAST_MODEL="$_ai_fast"
-    export CLAUDE_CODE_SUBAGENT_MODEL="$_ai_fast"
-
-    [[ -z "$CLAUDELOAD_QUIET" ]] && echo "Loaded: $ANTHROPIC_MODEL (aistudio, :9083) — fast/subagent: $ANTHROPIC_SMALL_FAST_MODEL"
-    unset _ai_models_json _ai_tsv _ai_base _ai_fast _ai_config
-    ;;
   status|s)
     echo "ANTHROPIC_BASE_URL=$ANTHROPIC_BASE_URL"
     echo "ANTHROPIC_MODEL=$ANTHROPIC_MODEL"
     echo "ANTHROPIC_SMALL_FAST_MODEL=$ANTHROPIC_SMALL_FAST_MODEL"
     ;;
+
   *)
-    echo "claudeload — switch Claude Code backend"
-    echo ""
-    echo "  (no args)   interactive menu: pick backend → pick model"
-    echo "  copilot     interactive: pick base (port 4141, copilot-api)"
-    echo "  windsurf    interactive: show catalog+credits, pick base (port 4142, WindsurfAPI)"
-    echo "  deepseek    deepseek-v4-pro[1m]  (api.deepseek.com)"
-    echo "  antigravity interactive: pick base (port 8080, antigravity-claude-proxy)"
-    echo "  status      show current config"
-    echo "  credits     run 'claudecredits' for live Windsurf rates"
-    echo ""
-    echo "Usage: source claudeload <profile> [model]"
-    echo "Proxies run foreground in tmux session 'proxies' (spawned only if their port is down)."
+    cat <<'EOF'
+claudeload — switch Claude Code backend
+
+  (no args)   interactive menu: pick backend → pick model
+  copilot     interactive: pick base (port 4141, copilot-api)
+  windsurf    interactive: show catalog+credits, pick base (port 4142, WindsurfAPI)
+  deepseek    DeepSeek models (api.deepseek.com)
+  antigravity interactive: pick base (port 9080, antigravity-claude-proxy)
+  aistudio    Google AI Studio via litellm (port 9083)
+  status      show current config
+
+Usage: source claudeload <profile> [model]
+Proxies run foreground in tmux session 'proxies' (spawned only if their port is down).
+EOF
     ;;
 esac
 
+# ── Global flags (applied regardless of backend) ─────────────────────────────
 export DISABLE_NON_ESSENTIAL_MODEL_CALLS=1
 export CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
-# Third-party proxy models (antigravity/copilot/windsurf) aren't in Claude Code's
-# built-in registry, so it can't guess their context window. This restores the
-# "ask the API" behavior instead of warning + assuming 200k.
+# Third-party proxy models aren't in Claude Code's built-in registry, so it
+# can't guess their context window.  This restores the "ask the API" behavior
+# instead of warning + assuming 200k.
 export CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT=1
