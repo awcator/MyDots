@@ -1,15 +1,19 @@
 {
+  "awsAuthRefresh": "aws sso login --profile default",
   "env": {
     "PLAYWRIGHT_MCP_EXECUTABLE_PATH": "/sbin/brave",
     "PLAYWRIGHT_MCP_NO_SANDBOX": "1",
     "PLAYWRIGHT_MCP_SHARED_BROWSER_CONTEXT": "1",
     "PLAYWRIGHT_MCP_USER_DATA_DIR": "~/.config/BraveSoftware/Brave-Browser",
     "TMUX_TMPDIR": "/var/tmp",
-    "SUDO_ASKPASS": "/home/awcator/bin/claude-askpass"
+    "SUDO_ASKPASS": "/home/awcator/bin/claude-askpass",
+    "CLAUDE_CODE_USE_BEDROCK": "0",
+    "AWS_REGION": "us-east-1",
+    "AWS_PROFILE": "default"
   },
   "attribution": {
-    "pr": "",
-    "commit": ""
+    "commit": "",
+    "pr": ""
   },
   "permissions": {
     "allow": [
