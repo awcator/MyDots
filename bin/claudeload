@@ -461,6 +461,14 @@ print("  accounts: %d/%d available, %d rate-limited" % (s.get("available",0), s.
   [[ -z "$fast" ]] && fast="$(_cl_derive_fast "$all" "^${vendor}.*sonnet")"
   : "${fast:=$base}"
 
+  if [[ "$base" == *claude* ]]; then
+    # Vertex/Antigravity rejects max_tokens > 8192 for Claude models
+    export CLAUDE_CODE_MAX_OUTPUT_TOKENS=8192
+  else
+    # Keep the global massive limit for Gemini models
+    export CLAUDE_CODE_MAX_OUTPUT_TOKENS=128000
+  fi
+
   _cl_export_models "$base" "$fast"
   _cl_log "Loaded: $ANTHROPIC_MODEL (antigravity, :9080)" \
           "— fast/subagent: $ANTHROPIC_SMALL_FAST_MODEL"
