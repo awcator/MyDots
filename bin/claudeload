@@ -2,7 +2,7 @@
 # claudeload — switch Claude Code backend in current shell
 # Usage: source claudeload <profile> [model]
 #
-# Backends: copilot | windsurf | deepseek | antigravity | aistudio
+# Backends: copilot | windsurf | deepseek | antigravity | aistudio | codexproxy
 # Proxies run foreground in tmux session 'proxies' (spawned only if port is down).
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -35,6 +35,9 @@ _cl_die()  { echo "$*" >&2; return 1 2>/dev/null || exit 1; }
 _cl_clear_env() {
   local v
   while IFS= read -r v; do unset -v "$v"; done < <(compgen -v 'ANTHROPIC_')
+  # DeepSeek deliberately sets this to low. Do not carry that constraint into
+  # another backend, where it can silently reduce Codex reasoning quality.
+  unset CLAUDE_CODE_EFFORT_LEVEL
 }
 
 # Export the six model env vars Claude Code uses.
@@ -106,6 +109,11 @@ _cl_fetch_json() {
   fi
 }
 
+# Keep non-conversational endpoints out of Claude Code's model picker.
+_cl_filter_chat_models() {
+  \grep -viE 'embedding|whisper|tts|dall-e|babbage|davinci|moderation|text-search|search|similarity|trajectory|compaction|image'
+}
+
 # Run inline Python that reads JSON from $_CL_JSON env var and prints TSV.
 #   _cl_models_to_tsv <json> <python_code>
 # Extra env vars can be prepended by the caller (e.g. _CL_EXTRA="val" _cl_models_to_tsv ...).
@@ -154,20 +162,22 @@ _cl_pick() {
   local n=${#ids[@]}
   (( n == 0 )) && return 1
 
-  printf '%b\n%b\n' "${_CL_B}${title}${_CL_0}" \
-                     "${_CL_D}  ${n} models${_CL_0}" >&2
+  printf '%b\n%b\n' "${_CL_B}${_CL_C}╭─ ${title}${_CL_0}" \
+                     "${_CL_D}│  ${n} available${_CL_0}" >&2
   local i mark
   for ((i=0; i<n; i++)); do
     mark=""
     [[ -n "${sts[$i]}" ]] && mark="  ${_CL_R}⚠ ${sts[$i]}${_CL_0}"
-    printf '%b%-4s%b%-30s%b  %s%s\n' \
-      "${_CL_C}  " "$((i+1)))" "${_CL_B}" "${ids[$i]}" "${_CL_0}" \
-      "${labs[$i]}" "$mark" >&2
+    printf '%b│ %2s) %b%-34s%b%s\n' \
+      "${_CL_C}" "$((i+1))" "${_CL_B}" "${ids[$i]}" "${_CL_0}" "$mark" >&2
+    [[ -n "${labs[$i]}" && "${labs[$i]}" != "${ids[$i]}" ]] && \
+      printf '%b│      %s%b\n' "${_CL_D}" "${labs[$i]}" "${_CL_0}" >&2
   done
+  printf '%b\n' "${_CL_C}╰────────────────────────────────────────${_CL_0}" >&2
 
   local sel
   while :; do
-    printf '%b' "${_CL_B}  pick (1-${n}, q to quit): ${_CL_0}" >&2
+    printf '%b' "${_CL_B}  Select 1-${n}  ${_CL_D}(q cancels)${_CL_0}: " >&2
     read -r sel
     [[ "$sel" == [qQ] ]] && return 1
     if [[ "$sel" =~ ^[0-9]+$ ]] && (( sel >= 1 && sel <= n )); then
@@ -176,6 +186,26 @@ _cl_pick() {
     fi
     printf '%b\n' "${_CL_R}  invalid choice${_CL_0}" >&2
   done
+}
+
+_cl_print_status() {
+  local endpoint="${ANTHROPIC_BASE_URL:-not configured}"
+  printf '%b\n' "${_CL_C}╭─ Claude Code backend${_CL_0}"
+  printf '%b\n' "${_CL_C}│${_CL_0} Endpoint   ${_CL_B}${endpoint}${_CL_0}"
+  printf '%b\n' "${_CL_C}│${_CL_0} Main       ${ANTHROPIC_MODEL:-not configured}"
+  printf '%b\n' "${_CL_C}│${_CL_0} Opus       ${ANTHROPIC_DEFAULT_OPUS_MODEL:-not configured}"
+  printf '%b\n' "${_CL_C}│${_CL_0} Sonnet     ${ANTHROPIC_DEFAULT_SONNET_MODEL:-not configured}"
+  printf '%b\n' "${_CL_C}│${_CL_0} Haiku/Fast ${ANTHROPIC_SMALL_FAST_MODEL:-not configured}"
+  printf '%b\n' "${_CL_C}│${_CL_0} Subagent   ${CLAUDE_CODE_SUBAGENT_MODEL:-not configured}"
+  if [[ "$endpoint" == http://127.0.0.1:* || "$endpoint" == http://localhost:* ]]; then
+    local health_url="${endpoint%/}/health"
+    if curl -sf -o /dev/null --max-time 1 "$health_url" 2>/dev/null; then
+      printf '%b\n' "${_CL_C}│${_CL_0} Service    ${_CL_G}healthy${_CL_0}"
+    else
+      printf '%b\n' "${_CL_C}│${_CL_0} Service    ${_CL_Y}not checked / unavailable${_CL_0}"
+    fi
+  fi
+  printf '%b\n' "${_CL_C}╰────────────────────────────────────────${_CL_0}"
 }
 
 # _cl_select_model "<title>" "<tsv>" [override]
@@ -217,7 +247,7 @@ _cl_backend_copilot() {
   # Fetch live model list from the proxy (no hardcoded fallback)
   local all
   all="$(\grep -o '"id":"[^"]*"' <<< "$(_cl_fetch_json http://localhost:4141/v1/models)" \
-        | cut -d'"' -f4 | sort -u -V)"
+        | cut -d'"' -f4 | _cl_filter_chat_models | sort -u -V)"
   if [[ -z "$all" ]]; then
     _cl_die "copilot: couldn't fetch models from :4141 (is copilot-api running?)"
     return 1
@@ -514,17 +544,202 @@ for mid, desc, status in rows:
 }
 
 # ══════════════════════════════════════════════════════════════════════════════
+#  Backend: OpenAI  (port 9084, litellm proxy)
+# ══════════════════════════════════════════════════════════════════════════════
+
+_cl_backend_openai() {
+  local model_override="${1:-}"
+
+  _cl_clear_env
+
+  if [[ -f "$HOME/.otp_secrets" ]]; then
+    source "$HOME/.otp_secrets"
+  fi
+
+  if [[ -z "${OPENAI_API_KEY:-}" ]]; then
+    _cl_die "openai: OPENAI_API_KEY not found in env or ~/.otp_secrets"
+    return 1
+  fi
+
+  # Ensure litellm is on PATH
+  command -v litellm >/dev/null 2>&1 || export PATH="$PATH:$HOME/.local/bin"
+  if ! command -v litellm >/dev/null 2>&1; then
+    _cl_die "openai: litellm not found! Install via: uv tool install 'litellm[proxy]'"
+    return 1
+  fi
+
+  local models_json
+  models_json="$(_cl_fetch_json "https://api.openai.com/v1/models" "$OPENAI_API_KEY")"
+  if [[ -z "$models_json" ]]; then
+    _cl_die "openai: couldn't fetch models from API (is OPENAI_API_KEY valid?)"
+    return 1
+  fi
+
+  # Generate litellm config from the live model catalog
+  local config="/tmp/claudeload_openai_litellm.yaml"
+  python3 -c '
+import json, sys
+models = json.load(sys.stdin).get("data", [])
+print("model_list:")
+for m in models:
+    mid = m.get("id", "")
+    if any(x in mid for x in ["embedding", "whisper", "tts", "dall-e", "babbage", "davinci", "moderation", "text-search", "ada", "curie", "search", "similarity", "edit", "-transcribe", "image"]):
+        continue
+    print(f"  - model_name: {mid}")
+    print(f"    litellm_params:")
+    print(f"      model: openai/{mid}")
+    print(f"      api_key: os.environ/OPENAI_API_KEY")
+' <<< "$models_json" > "$config"
+
+  export ANTHROPIC_BASE_URL=http://localhost:9084
+  export ANTHROPIC_API_KEY=dummy
+  _cl_spawn_proxy openai 9084 env OPENAI_API_KEY="$OPENAI_API_KEY" litellm --config "$config" --port 9084
+
+  local tsv
+  tsv="$(_cl_models_to_tsv "$models_json" "${_CL_PY_SORT}"'
+import json, os
+models = json.loads(os.environ["_CL_JSON"]).get("data", [])
+rows = []
+for m in models:
+    mid = m.get("id", "")
+    if any(x in mid for x in ["embedding", "whisper", "tts", "dall-e", "babbage", "davinci", "moderation", "text-search", "ada", "curie", "search", "similarity", "edit", "-transcribe", "image"]):
+        continue
+    desc = "OpenAI Reasoning Model" if mid.startswith("o") else "OpenAI Model"
+    rows.append((mid, desc, ""))
+rows.sort(key=_nkey)
+for mid, desc, status in rows:
+    print("%s\t%s\t%s" % (mid, desc, status))
+')"
+
+  local base
+  base="$(_cl_select_model "OpenAI models (:9084)" "$tsv" "$model_override")" \
+    || return 1
+
+  local fast
+  fast="$(echo "$tsv" | cut -f1 | \grep -iE "mini|nano|flash|lite" | tail -1)"
+  : "${fast:=$base}"
+
+  _cl_export_models "$base" "$fast"
+  _cl_log "Loaded: $ANTHROPIC_MODEL (openai, :9084)"           "— fast/subagent: $ANTHROPIC_SMALL_FAST_MODEL"
+}
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  Backend: Codex Proxy  (port 8081, Docker)
+# ══════════════════════════════════════════════════════════════════════════════
+
+_cl_backend_codexproxy() {
+  local model_override="${1:-}"
+  local base_url="${CODEX_PROXY_BASE_URL:-http://127.0.0.1:8081}"
+  local key="${CODEX_PROXY_API_KEY:-}"
+  local key_file="${CODEX_PROXY_CONFIG:-/home/awcator/Documents/codex-proxy/data/local.yaml}"
+  local compose_dir="${CODEX_PROXY_DIR:-/home/awcator/Documents/codex-proxy}"
+
+  _cl_clear_env
+
+  # Prefer an explicitly supplied key.  The Docker setup stores its generated
+  # local key in data/local.yaml; read it only when no override was supplied.
+  if [[ -z "$key" && -r "$key_file" ]]; then
+    key="$(sed -n 's/^[[:space:]]*proxy_api_key:[[:space:]]*//p' "$key_file" | head -n 1)"
+    key="${key%%[[:space:]]#*}"
+    key="${key#\"}"; key="${key%\"}"
+    key="${key#\'}"; key="${key%\'}"
+  fi
+  if [[ -z "$key" || "$key" == "null" ]]; then
+    _cl_die "codexproxy: API key unavailable — set CODEX_PROXY_API_KEY or log in to the local dashboard"
+    return 1
+  fi
+
+  local port="${base_url##*:}"
+  if ! _cl_port_up "$port"; then
+    # Like the other local backends, start the default local service on demand.
+    # An explicitly configured remote/custom URL remains caller-managed.
+    if [[ "$base_url" != "http://127.0.0.1:8081" && "$base_url" != "http://localhost:8081" ]]; then
+      _cl_die "codexproxy: not reachable at $base_url"
+      return 1
+    fi
+    if ! command -v docker >/dev/null 2>&1 || [[ ! -f "$compose_dir/docker-compose.yml" ]]; then
+      _cl_die "codexproxy: Docker Compose setup not found at $compose_dir"
+      return 1
+    fi
+    _cl_spawn_proxy codexproxy "$port" \
+      bash -c 'cd "$1" && exec docker compose up' _ "$compose_dir"
+    if ! _cl_port_up "$port"; then
+      _cl_die "codexproxy: :8081 did not become ready after 30 seconds"
+      return 1
+    fi
+  fi
+
+  export ANTHROPIC_BASE_URL="$base_url"
+  export ANTHROPIC_API_KEY="$key"
+
+  # Fetch the extended catalog for useful labels and availability metadata.
+  # Fall back to the standard OpenAI model list if the extended endpoint is
+  # unavailable on an older Codex Proxy image. After an on-demand Docker
+  # start, allow time for the authenticated account's catalog refresh.
+  local models_json i
+  for i in {1..15}; do
+    models_json="$(_cl_fetch_json "$base_url/v1/models/catalog" "$key")"
+    [[ -z "$models_json" ]] && models_json="$(_cl_fetch_json "$base_url/v1/models" "$key")"
+    [[ -n "$models_json" && "$models_json" != "[]" && "$models_json" != '{"object":"list","data":[]}' ]] && break
+    sleep 1
+  done
+  if [[ -z "$models_json" || "$models_json" == "[]" || "$models_json" == '{"object":"list","data":[]}' ]]; then
+    _cl_die "codexproxy: no models available — log in to the dashboard, then restart the Docker container"
+    return 1
+  fi
+
+  local tsv
+  tsv="$(_cl_models_to_tsv "$models_json" "${_CL_PY_SORT}"'
+import json, os
+payload = json.loads(os.environ["_CL_JSON"])
+models = payload.get("data", []) if isinstance(payload, dict) else payload
+rows = []
+for m in models:
+    mid = m.get("id", "")
+    if not mid:
+        continue
+    desc = m.get("displayName") or m.get("description") or "Codex model"
+    upgrade = m.get("upgrade") or {}
+    status = ("upgrade → %s" % upgrade.get("model")) if upgrade.get("model") else ""
+    rows.append((mid, desc, status))
+rows.sort(key=_nkey)
+for mid, desc, status in rows:
+    print("%s\t%s\t%s" % (mid, desc, status))
+')"
+
+  local base
+  base="$(_cl_select_model "Codex Proxy models ($base_url)" "$tsv" "$model_override")" \
+    || return 1
+
+  # Derive companion roles from the live catalog. Prefer current, stable Codex
+  # families: Terra for balanced work and Luna for inexpensive parallel work.
+  # Preview-only models are fallback choices, not the default subagent tier.
+  local all fast sonnet
+  all="$(echo "$tsv" | cut -f1)"
+  sonnet="$(printf '%s\n' "$all" | \grep -x 'gpt-5.6-terra' | head -1)"
+  [[ -z "$sonnet" ]] && sonnet="$(printf '%s\n' "$all" | \grep -i 'terra' | head -1)"
+  fast="$(printf '%s\n' "$all" | \grep -x 'gpt-5.6-luna' | head -1)"
+  [[ -z "$fast" ]] && fast="$(printf '%s\n' "$all" | \grep -iE 'luna|mini' | \grep -vi 'preview' | head -1)"
+  [[ -z "$fast" ]] && fast="$(printf '%s\n' "$all" | \grep -i 'spark' | head -1)"
+  : "${fast:=$base}" "${sonnet:=$base}"
+
+  _cl_export_models "$base" "$fast" "$sonnet"
+  _cl_log "Loaded: $ANTHROPIC_MODEL (codexproxy, $base_url)" \
+          "— sonnet: $ANTHROPIC_DEFAULT_SONNET_MODEL," \
+          "haiku/subagent: $ANTHROPIC_SMALL_FAST_MODEL"
+}
+
+# ══════════════════════════════════════════════════════════════════════════════
 #  Main Dispatch
 # ══════════════════════════════════════════════════════════════════════════════
 
 case "${1:-}" in
   ""|menu|m)
-    echo "claudeload — pick a backend:"
-    PS3="  backend> "
-    select _prof in copilot windsurf deepseek antigravity aistudio; do
-      [[ -n "$_prof" ]] && break
-    done
-    source "$_CLD_SELF" "$_prof"
+    if _prof="$(_cl_pick "Choose Claude Code backend" $'codexproxy\tLocal Codex Proxy (Docker, :8081)\nopenai\tOpenAI / ChatGPT via LiteLLM (:9084)\ncopilot\tGitHub Copilot proxy (:4141)\nwindsurf\tWindsurf API proxy (:4142)\ndeepseek\tDeepSeek direct API\nantigravity\tAntigravity account proxy (:9080)\naistudio\tGoogle AI Studio via LiteLLM (:9083)')"; then
+      source "$_CLD_SELF" "$_prof"
+    else
+      echo "  cancelled" >&2
+    fi
     ;;
 
   copilot|cop|opus)    _cl_backend_copilot   "${2:-}" ;;
@@ -532,11 +747,11 @@ case "${1:-}" in
   deepseek)            _cl_backend_deepseek  "${2:-}" ;;
   antigravity|ag)      _cl_backend_antigravity "${2:-}" ;;
   aistudio|ai)         _cl_backend_aistudio  "${2:-}" ;;
+  openai|chatgpt|oai)  _cl_backend_openai    "${2:-}" ;;
+  codexproxy|codex-proxy|codex|cp) _cl_backend_codexproxy "${2:-}" ;;
 
   status|s)
-    echo "ANTHROPIC_BASE_URL=$ANTHROPIC_BASE_URL"
-    echo "ANTHROPIC_MODEL=$ANTHROPIC_MODEL"
-    echo "ANTHROPIC_SMALL_FAST_MODEL=$ANTHROPIC_SMALL_FAST_MODEL"
+    _cl_print_status
     ;;
 
   *)
@@ -549,6 +764,8 @@ claudeload — switch Claude Code backend
   deepseek    DeepSeek models (api.deepseek.com)
   antigravity interactive: pick base (port 9080, antigravity-claude-proxy)
   aistudio    Google AI Studio via litellm (port 9083)
+  openai      OpenAI / ChatGPT via litellm (port 9084)
+  codexproxy  Codex Proxy via Docker (port 8081; live Codex model picker)
   status      show current config
 
 Usage: source claudeload <profile> [model]
