@@ -1,0 +1,22 @@
+model = "gpt-5.5"
+model_reasoning_effort = "medium"
+approvals_reviewer = "user"
+approval_policy = "never"
+developer_instructions = "Never add AI attribution, including Co-Authored-By lines, to git commit messages or pull requests."
+notify = ["notify-send", "-t", "5000", "-i", "dialog-information", "Codex"]
+sandbox_mode = "danger-full-access"
+
+[shell_environment_policy]
+inherit = "all"
+set = { PLAYWRIGHT_MCP_EXECUTABLE_PATH = "/sbin/brave", PLAYWRIGHT_MCP_NO_SANDBOX = "1", PLAYWRIGHT_MCP_SHARED_BROWSER_CONTEXT = "1", PLAYWRIGHT_MCP_USER_DATA_DIR = "~/.config/BraveSoftware/Brave-Browser", TMUX_TMPDIR = "/var/tmp", SUDO_ASKPASS = "/home/awcator/bin/claude-askpass", AWS_REGION = "us-east-1", AWS_PROFILE = "default" }
+[projects."/home/awcator/Documents/MyDots"]
+trust_level = "trusted"
+
+[projects."/home/awcator/Documents/comfi"]
+trust_level = "trusted"
+
+[projects."/home/awcator"]
+trust_level = "trusted"
+
+[projects."/home/awcator/Documents"]
+trust_level = "trusted"
