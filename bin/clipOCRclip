@@ -3,19 +3,33 @@
 set -e
 TMP_DIR=$(mktemp -d)
 IMAGE="$TMP_DIR/input.png"
-BORDERED="$TMP_DIR/bordered.png"
 
 # Check if clipboard has an image
 if xclip -selection clipboard -t image/png -o > "$IMAGE" 2>/dev/null; then
-    convert "$IMAGE" -bordercolor White -border 10x10 "$BORDERED"
-    
-    OCR_TEXT=$(tesseract "$BORDERED" stdout 2>/dev/null)
-    
+
+    # AI Brain Upgrade: Use EasyOCR (Deep Learning) via virtual environment
+    OCR_TEXT=$(~/.local/share/easyocr-venv/bin/python -c "
+import easyocr
+import sys
+import warnings
+warnings.filterwarnings('ignore')
+
+try:
+    # gpu=True enabled as requested.
+    # (If no NVIDIA/AMD driver is found, PyTorch will silently fallback to CPU)
+    reader = easyocr.Reader(['en', 'kn'], gpu=True, verbose=False)
+    result = reader.readtext('$IMAGE', detail=0, paragraph=True)
+    if result:
+        print('\n'.join(result))
+except Exception:
+    sys.exit(1)
+")
+
     if [[ -n "$OCR_TEXT" ]]; then
-        echo "$OCR_TEXT" | xclip -selection clipboard -i
+        echo -n "$OCR_TEXT" | xclip -selection clipboard -i
         notify-send "clipOCRclip" "\"$OCR_TEXT\"  copied to the clipboard"
     else
-        notify-send "Tesseract OCR Failed" "No text could be extracted from image."
+        notify-send "EasyOCR Failed" "No text could be extracted from image."
         exit 1
     fi
 else

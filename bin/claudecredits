@@ -84,8 +84,11 @@ if (status.periodStart) console.error('Period: ' + new Date(status.periodStart).
 console.error('');
 
 if (!status.rateTable || typeof status.rateTable !== 'object') {
-  console.error('No rate table returned (raw: ' + JSON.stringify(status.rateTable) + ')');
-  process.exit(1);
+  console.error('No rate table returned (raw: ' + JSON.stringify(status.rateTable) + ') - using catalog models with 0 credit rate');
+  status.rateTable = {};
+  for (const m of catalog) {
+    if (m.selector) status.rateTable[m.selector] = 0;
+  }
 }
 
 // Normalize: treat . and - as interchangeable so '4.6' matches '4-6'
