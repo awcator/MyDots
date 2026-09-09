@@ -2,8 +2,6 @@
 	autocrlf = input
 	excludesfile = /home/awcator/.gitignore_global
 	pager = delta
-[credential]
-	helper = store
 [user]
 	name = Awcator
 	email = devayya.sm@philips.com
@@ -35,3 +33,7 @@
 	conflictStyle = zdiff3
 [alias]
 	prdiff = diff master...HEAD
+[credential]
+	helper = /home/awcator/.git-credential-readonly
+[credential "https://github.com/XXXXXXX/XXXXXXX.git"]
+	useHttpPath = true
