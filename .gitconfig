@@ -35,5 +35,10 @@
 	prdiff = diff master...HEAD
 [credential]
 	helper = /home/awcator/.git-credential-readonly
-[credential "https://github.com/XXXXXXX/XXXXXXX.git"]
+	useHttpPath = true
+[credential "https://github.com/bullithulli/knmod.git"]
+	useHttpPath = true
+[credential "https://github.com/philips-internal"]
+	useHttpPath = true
+[credential "https://github.com"]
 	useHttpPath = true
