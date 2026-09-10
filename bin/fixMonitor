@@ -8,7 +8,9 @@ PRIMARY=$(echo "$XRANDR_OUT" | awk '/ connected/ {print $1}' | grep -i 'edp' | h
 
 [ -z "$PRIMARY" ] && { echo "Error: No primary display found."; exit 1; }
 
-PHYSICAL_CONNECTED=$(cat /sys/class/drm/*/status 2>/dev/null | grep -cw "^connected")
+DRM_CONNECTED=$(cat /sys/class/drm/*/status 2>/dev/null | grep -cw "^connected")
+XRANDR_CONNECTED=$(echo "$XRANDR_OUT" | grep -c " connected")
+PHYSICAL_CONNECTED=$(( DRM_CONNECTED > XRANDR_CONNECTED ? DRM_CONNECTED : XRANDR_CONNECTED ))
 CMD="xrandr"
 
 if [ "$PHYSICAL_CONNECTED" -le 1 ]; then
