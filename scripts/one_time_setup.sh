@@ -28,8 +28,60 @@ fix_mime_defaults() {
 # }
 
 
+
+protect_sensitive_files() {
+    echo "Protecting sensitive dotfiles and directories from unwanted modifications..."
+    
+    # List of files and directories to protect
+    # Core configuration files and directories to lock down
+    local targets=(
+        # Shell and environment profiles
+        ~/.bashrc
+        ~/.bash_profile
+        ~/.bash_aliases
+        ~/.zshrc
+        ~/.xinitrc
+        
+        # Startup and service configurations
+        ~/.config/autostart
+        ~/.config/systemd/user
+        
+        # Dynamically include ALL SSH files (keys, configs, etc.)
+        ~/.ssh/*
+        
+        # Application configs and secrets
+        ~/.tmux.conf
+        ~/.inputrc
+        ~/.claude/settings.json
+        ~/.otp_secrets
+    )
+    
+    for target in "${targets[@]}"; do
+        # Skip known_hosts so normal SSH connections don't break when connecting to new servers
+        if [[ "$target" == *"/.ssh/known_hosts"* ]]; then
+            continue
+        fi
+
+        # Resolve the real path in case it's a symlink
+        local real_path="$target"
+        if [ -L "$real_path" ]; then
+            real_path=$(readlink -f "$real_path")
+        fi
+        
+        if [ -e "$real_path" ]; then
+            echo "Making $real_path immutable..."
+            sudo chattr -R +i "$real_path" 2>/dev/null || sudo chattr +i "$real_path"
+        else
+            echo "Skipping $target: not found."
+        fi
+    done
+    
+    echo "Done protecting sensitive files."
+}
+
 # =========================================================
 # Main execution logic
+
 # =========================================================
 
 show_help() {
