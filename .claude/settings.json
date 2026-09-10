@@ -92,6 +92,15 @@
             "timeout": 10
           }
         ]
+      },
+      {
+        "matcher": "Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "jq -r '\"\\n--- REMOVED ---\\n\" + .tool_input.old_string + \"\\n--- ADDED ---\\n\" + .tool_input.new_string + \"\\n\"'"
+          }
+        ]
       }
     ],
     "PreToolUse": [
