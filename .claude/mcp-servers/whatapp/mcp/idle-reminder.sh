@@ -70,15 +70,27 @@ call_escalation() {
   rm -f "$mp3"
 }
 
+cleanup_and_exit() {
+  [ $# -gt 0 ] && log "$*"
+  rm -rf "$d" 2>/dev/null
+  exit 0
+}
+
+read_hook_input() {
+  input="$(cat 2>/dev/null)"
+  session_id="$(printf '%s' "$input" | jq -r '.session_id // empty' 2>/dev/null)"
+  d="$(state_dir "$session_id")"
+}
+
+kill_existing_loop() {
+  if [ -f "$d/pid" ]; then kill "$(cat "$d/pid")" 2>/dev/null || true; fi
+}
+
 case "${1:-}" in
   --stop)
-    input="$(cat 2>/dev/null)"
-    session_id="$(printf '%s' "$input" | jq -r '.session_id // empty' 2>/dev/null)"
-    d="$(state_dir "$session_id")"
-    if [ -f "$d/pid" ]; then kill "$(cat "$d/pid")" 2>/dev/null; fi
-    touch "$d/cancel" 2>/dev/null
-    rm -rf "$d" 2>/dev/null
-    exit 0
+    read_hook_input
+    kill_existing_loop
+    cleanup_and_exit
     ;;
 
   --loop)
@@ -89,9 +101,13 @@ case "${1:-}" in
     fi
     LOG_FILE="$d/log"
     echo "$$" > "$d/pid"
-    project="$(cat "$d/project" 2>/dev/null || echo unknown)"
-    short_id="$(cat "$d/session" 2>/dev/null)"
-    transcript="$(cat "$d/transcript" 2>/dev/null)"
+
+    project="unknown"
+    short_id=""
+    transcript=""
+    claude_pid=""
+    [ -f "$d/env" ] && source "$d/env"
+
     log "loop start pid=$$ project=$project"
 
     # Fixed schedule: gap (seconds) between reminders, and the action for each.
@@ -100,6 +116,7 @@ case "${1:-}" in
     actions=(text text text)
     idx=0
     elapsed=0
+
     while :; do
       if [ "$idx" -lt "${#delays[@]}" ]; then
         delay="${delays[$idx]}"
@@ -108,8 +125,16 @@ case "${1:-}" in
         delay=180
         action=call
       fi
-      sleep "$delay"
-      if [ -f "$d/cancel" ]; then log "cancel flag set — exiting"; rm -rf "$d"; exit 0; fi
+
+      left="$delay"
+      while [ "$left" -gt 0 ]; do
+        if [ -n "$claude_pid" ] && ! kill -0 "$claude_pid" 2>/dev/null; then
+          cleanup_and_exit "Claude parent process ($claude_pid) is dead — exiting"
+        fi
+        sleep 5
+        left=$((left - 5))
+      done
+
       elapsed=$((elapsed + delay))
       total_mins=$((elapsed / 60))
 
@@ -129,23 +154,35 @@ case "${1:-}" in
     ;;
 
   *)  # foreground (hook) mode
-    input="$(cat 2>/dev/null)"
-    session_id="$(printf '%s' "$input" | jq -r '.session_id // empty' 2>/dev/null)"
+    read_hook_input
     cwd="$(printf '%s' "$input" | jq -r '.cwd // empty' 2>/dev/null)"
     transcript_path="$(printf '%s' "$input" | jq -r '.transcript_path // empty' 2>/dev/null)"
     project="${cwd##*/}"; project="${project#-}"; [ -z "$project" ] && project="unknown"
     short_id=""; [ -n "$session_id" ] && short_id="${session_id%%-*}"
 
-    d="$(state_dir "$session_id")"
     mkdir -p "$d"
-    printf '%s' "$project" > "$d/project"
-    printf '%s' "$short_id" > "$d/session"
-    printf '%s' "$transcript_path" > "$d/transcript"
 
-    # Kill any previous loop *for this session* and clear its cancel flag,
-    # then relaunch detached.
-    if [ -f "$d/pid" ]; then kill "$(cat "$d/pid")" 2>/dev/null; fi
-    rm -f "$d/cancel"
+    current_pid=$PPID
+    claude_pid=""
+    for i in {1..5}; do
+      [ -z "$current_pid" ] || [ "$current_pid" -eq 1 ] && break
+      comm=$(ps -p "$current_pid" -o comm= 2>/dev/null || true)
+      if [[ "$comm" == *"node"* ]] || [[ "$comm" == *"claude"* ]]; then
+        claude_pid="$current_pid"
+        break
+      fi
+      current_pid=$(ps -p "$current_pid" -o ppid= 2>/dev/null | tr -d ' ' || true)
+    done
+
+    cat <<EOF > "$d/env"
+project="$project"
+short_id="$short_id"
+transcript="$transcript_path"
+claude_pid="$claude_pid"
+EOF
+
+    # Kill any previous loop *for this session* and relaunch detached.
+    kill_existing_loop
     setsid nohup "$0" --loop "$d" </dev/null >/dev/null 2>&1 &
     exit 0
     ;;
