@@ -160,7 +160,7 @@ if [ -z "$DISPLAY_ID" ]; then
     echo "WARNING: Could not detect Sunshine display ID."
 else
     echo "Found $VIRTUAL_OUTPUT as Sunshine display ID: $DISPLAY_ID"
-    echo "output_name = $DISPLAY_ID" >> "$SUNSHINE_CONF"
+    echo "output_name = $VIRTUAL_OUTPUT" >> "$SUNSHINE_CONF"
 fi
 
 echo ""
