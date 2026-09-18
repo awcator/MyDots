@@ -154,9 +154,6 @@ server.tool(
       });
       const page = await browser.newPage();
 
-      // Set a standard user agent to avoid 403 blocks from bot detection
-      await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
-
       // Set a 15-second timeout for navigation
       page.setDefaultNavigationTimeout(15000);
 
