@@ -8,7 +8,10 @@ import { promisify } from "node:util";
 import { Readability } from "@mozilla/readability";
 import { JSDOM } from "jsdom";
 import TurndownService from "turndown";
-import puppeteer from "puppeteer";
+import puppeteer from "puppeteer-extra";
+import StealthPlugin from "puppeteer-extra-plugin-stealth";
+
+puppeteer.use(StealthPlugin());
 
 const execFileAsync = promisify(execFile);
 
@@ -16,6 +19,67 @@ const server = new McpServer({
   name: "web-search",
   version: "1.1.0",
 });
+
+/**
+ * Shared helper to execute DuckDuckGo search scripts in Python and parse the JSON results.
+ */
+async function executeDDGQuery(method, query, count, time_limit) {
+  const trimmed = query.trim();
+  if (!trimmed) {
+    throw new Error("Search query cannot be empty.");
+  }
+
+  const n = Math.min(Math.max(count || 5, 1), 20);
+  const safeQuery = trimmed.length > 500 ? trimmed.slice(0, 500) : trimmed;
+
+  const script = `
+from ddgs import DDGS
+import json, sys
+
+try:
+    kwargs = {"max_results": int(sys.argv[2])}
+    if sys.argv[3] != "None":
+        kwargs["timelimit"] = sys.argv[3]
+
+    results = list(DDGS().${method}(sys.argv[1], **kwargs))
+    print(json.dumps(results))
+except Exception as e:
+    print(json.dumps({"error": str(e)}))
+`;
+
+  const { stdout, stderr } = await execFileAsync("python3", ["-c", script, safeQuery, String(n), time_limit || "None"], {
+    timeout: 30000,
+    maxBuffer: 1024 * 1024,
+  });
+
+  const output = stdout.trim();
+  if (!output) {
+    throw new Error(`Search failed: no output from search backend.${stderr ? " stderr: " + stderr.slice(0, 200) : ""}`);
+  }
+
+  let data;
+  try {
+    data = JSON.parse(output);
+  } catch {
+    throw new Error(`Search failed: could not parse results. Raw: ${output.slice(0, 300)}`);
+  }
+
+  if (data && data.error) {
+    throw new Error(`Search error: ${data.error}`);
+  }
+
+  return { data, safeQuery };
+}
+
+/**
+ * Formats a generic error into an MCP text content block.
+ */
+function handleDDGError(err, timeoutMessage) {
+  if (err.killed) {
+    return { content: [{ type: "text", text: timeoutMessage }], isError: true };
+  }
+  return { content: [{ type: "text", text: err.message || `Error: ${err}` }], isError: true };
+}
 
 server.tool(
   "web_search",
@@ -26,52 +90,8 @@ server.tool(
     time_limit: z.enum(["d", "w", "m", "y"]).optional().describe("Time limit: 'd' (day), 'w' (week), 'm' (month), 'y' (year)"),
   },
   async ({ query, count, time_limit }) => {
-    const trimmed = query.trim();
-    if (!trimmed) {
-      return { content: [{ type: "text", text: "Error: search query cannot be empty." }], isError: true };
-    }
-
-    const n = Math.min(Math.max(count || 5, 1), 20);
-    const safeQuery = trimmed.length > 500 ? trimmed.slice(0, 500) : trimmed;
-
-    const script = `
-from ddgs import DDGS
-import json, sys
-
-try:
-    kwargs = {"max_results": int(sys.argv[2])}
-    if sys.argv[3] != "None":
-        kwargs["timelimit"] = sys.argv[3]
-
-    results = list(DDGS().text(sys.argv[1], **kwargs))
-    print(json.dumps(results))
-except Exception as e:
-    print(json.dumps({"error": str(e)}))
-`;
     try {
-      const { stdout, stderr } = await execFileAsync("python3", ["-c", script, safeQuery, String(n), time_limit || "None"], {
-        timeout: 30000,
-        maxBuffer: 1024 * 1024,
-      });
-
-      const output = stdout.trim();
-      if (!output) {
-        return {
-          content: [{ type: "text", text: `Search failed: no output from search backend.${stderr ? " stderr: " + stderr.slice(0, 200) : ""}` }],
-          isError: true,
-        };
-      }
-
-      let data;
-      try {
-        data = JSON.parse(output);
-      } catch {
-        return { content: [{ type: "text", text: `Search failed: could not parse results. Raw: ${output.slice(0, 300)}` }], isError: true };
-      }
-
-      if (data && data.error) {
-        return { content: [{ type: "text", text: `Search error: ${data.error}` }], isError: true };
-      }
+      const { data, safeQuery } = await executeDDGQuery('text', query, count, time_limit);
 
       if (!Array.isArray(data) || data.length === 0) {
         return { content: [{ type: "text", text: `No results found for: ${safeQuery}` }] };
@@ -85,10 +105,7 @@ except Exception as e:
         content: [{ type: "text", text: `Search results for "${safeQuery}":\n\n${formatted}` }],
       };
     } catch (err) {
-      if (err.killed) {
-        return { content: [{ type: "text", text: "Search timed out after 30 seconds. Try a simpler query." }], isError: true };
-      }
-      return { content: [{ type: "text", text: `Search error: ${err.message}` }], isError: true };
+      return handleDDGError(err, "Search timed out after 30 seconds. Try a simpler query.");
     }
   }
 );
@@ -102,52 +119,8 @@ server.tool(
     time_limit: z.enum(["d", "w", "m", "y"]).optional().describe("Time limit: 'd' (day), 'w' (week), 'm' (month), 'y' (year)"),
   },
   async ({ query, count, time_limit }) => {
-    const trimmed = query.trim();
-    if (!trimmed) {
-      return { content: [{ type: "text", text: "Error: search query cannot be empty." }], isError: true };
-    }
-
-    const n = Math.min(Math.max(count || 5, 1), 20);
-    const safeQuery = trimmed.length > 500 ? trimmed.slice(0, 500) : trimmed;
-
-    const script = `
-from ddgs import DDGS
-import json, sys
-
-try:
-    kwargs = {"max_results": int(sys.argv[2])}
-    if sys.argv[3] != "None":
-        kwargs["timelimit"] = sys.argv[3]
-
-    results = list(DDGS().news(sys.argv[1], **kwargs))
-    print(json.dumps(results))
-except Exception as e:
-    print(json.dumps({"error": str(e)}))
-`;
     try {
-      const { stdout, stderr } = await execFileAsync("python3", ["-c", script, safeQuery, String(n), time_limit || "None"], {
-        timeout: 30000,
-        maxBuffer: 1024 * 1024,
-      });
-
-      const output = stdout.trim();
-      if (!output) {
-        return {
-          content: [{ type: "text", text: `Search failed: no output from search backend.${stderr ? " stderr: " + stderr.slice(0, 200) : ""}` }],
-          isError: true,
-        };
-      }
-
-      let data;
-      try {
-        data = JSON.parse(output);
-      } catch {
-        return { content: [{ type: "text", text: `Search failed: could not parse results. Raw: ${output.slice(0, 300)}` }], isError: true };
-      }
-
-      if (data && data.error) {
-        return { content: [{ type: "text", text: `Search error: ${data.error}` }], isError: true };
-      }
+      const { data, safeQuery } = await executeDDGQuery('news', query, count, time_limit);
 
       if (!Array.isArray(data) || data.length === 0) {
         return { content: [{ type: "text", text: `No news found for: ${safeQuery}` }] };
@@ -161,10 +134,7 @@ except Exception as e:
         content: [{ type: "text", text: `News results for "${safeQuery}":\n\n${formatted}` }],
       };
     } catch (err) {
-      if (err.killed) {
-        return { content: [{ type: "text", text: "News search timed out after 30 seconds." }], isError: true };
-      }
-      return { content: [{ type: "text", text: `News search error: ${err.message}` }], isError: true };
+      return handleDDGError(err, "News search timed out after 30 seconds.");
     }
   }
 );
@@ -183,6 +153,9 @@ server.tool(
         args: ['--no-sandbox', '--disable-setuid-sandbox']
       });
       const page = await browser.newPage();
+
+      // Set a standard user agent to avoid 403 blocks from bot detection
+      await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
 
       // Set a 15-second timeout for navigation
       page.setDefaultNavigationTimeout(15000);
