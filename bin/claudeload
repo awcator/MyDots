@@ -383,94 +383,120 @@ for mid, desc, status in rows:
 }
 
 # ══════════════════════════════════════════════════════════════════════════════
-#  Backend: Antigravity  (port 9080, acc proxy)
+#  Backend: Antigravity  (port 9080, local clone of antigravity-claude-proxy)
 # ══════════════════════════════════════════════════════════════════════════════
+
+# Run the locally patched clone, not the published `acc` bin. The released
+# build ordered the dead cloudcode-pa prod endpoint first and lacks the
+# signature-scrubbing and Claude max-token fixes, so `acc start` fails with a
+# misleading 429 "quota exhausted" on every account.
+AG_REPO="${AG_REPO:-/home/awcator/Documents/antigravity-claude-proxy}"
+AG_PORT="${AG_PORT:-9080}"
+
+# Models the quota API advertises but that do not actually serve. Verified
+# 2026-09-17 by querying the Cloud Code API directly with a minted token:
+#   gemini-2.5-pro      503 "No capacity available for model" — retired upstream
+#   gemini-3.1-pro-high 400 INVALID_ARGUMENT under every request shape tried
+#                       (no generationConfig; maxOutputTokens 16k and 65k;
+#                       thinking budgets 128 and 10001). Its sibling
+#                       gemini-3.1-pro-low answers fine, so it is the id that is
+#                       dead, not the request. Picking it costs a ~2 min retry
+#                       ladder before it gives up.
+# Both are still listed by every proxy endpoint, so filter them here. Override to
+# re-test, and prune entries that start working again:
+#   AG_DEAD_MODELS="gemini-2.5-pro" source claudeload antigravity
+AG_DEAD_MODELS="${AG_DEAD_MODELS:-gemini-2.5-pro gemini-3.1-pro-high}"
 
 _cl_backend_antigravity() {
   local model_override="${1:-}"
 
+  if [[ ! -f "$AG_REPO/src/index.js" ]]; then
+    _cl_die "antigravity: no clone at $AG_REPO (set AG_REPO to the repo path)"
+    return 1
+  fi
+
   _cl_clear_env
-  export ANTHROPIC_BASE_URL=http://localhost:9080
+  export ANTHROPIC_BASE_URL="http://localhost:$AG_PORT"
   export ANTHROPIC_AUTH_TOKEN=test
 
-  _cl_spawn_proxy antigravity 9080 env PORT=9080 acc start --log
+  _cl_spawn_proxy antigravity "$AG_PORT" \
+    bash -c 'cd "$1" && exec env PORT="$2" node src/index.js' _ "$AG_REPO" "$AG_PORT"
 
-  local models_json accounts_json
-  models_json="$(_cl_fetch_json "http://localhost:9080/v1/models")"
-  accounts_json="$(_cl_fetch_json "http://localhost:9080/api/accounts")"
+  local models_json accounts_json health_json
+  models_json="$(_cl_fetch_json "http://localhost:$AG_PORT/v1/models")"
+  accounts_json="$(_cl_fetch_json "http://localhost:$AG_PORT/api/accounts")"
+  health_json="$(_cl_fetch_json "http://localhost:$AG_PORT/health")"
 
   if [[ -z "$models_json" ]]; then
     _cl_die "antigravity: couldn't fetch models from $ANTHROPIC_BASE_URL (is the proxy + account working?)"
     return 1
   fi
 
-  local all
-  all="$(\grep -o '"id":"[^"]*"' <<< "$models_json" | cut -d'"' -f4 | sort -u -V)"
+  # Build the catalog of record from the proxy's own view of the account pool.
+  #
+  # /v1/models is not a full catalog: upstream hides every Gemini id below 3.5
+  # ("curate /v1/models listing"), yet most of those still serve — only retired
+  # ones 503. /api/accounts is worse: it exposes modelRateLimits, i.e. only the
+  # models that have *already* hit a rate limit, so it is empty on a fresh proxy
+  # or after any cooldown reset, and it can never list a healthy model. /health
+  # reports the full per-account quota set, so use that as the source of truth
+  # and fold in the listing for anything it doesn't cover.
+  local catalog_json
+  catalog_json="$(_AG_HEALTH="$health_json" _AG_MODELS="$models_json" \
+                  _AG_DEAD="$AG_DEAD_MODELS" python3 -c '
+import json, os
+seen, ids, descs = set(), [], []
+dead = set((os.environ.get("_AG_DEAD") or "").split())
+
+def add(mid, desc=""):
+    if mid and mid not in seen and mid not in dead:
+        seen.add(mid)
+        ids.append(mid)
+        descs.append(desc)
+
+try:
+    for m in json.loads(os.environ.get("_AG_MODELS") or "{}").get("data", []):
+        add(m.get("id"), m.get("description") or "")
+except Exception:
+    pass
+try:
+    for a in json.loads(os.environ.get("_AG_HEALTH") or "{}").get("accounts", []):
+        for mid in (a.get("models") or {}):
+            add(mid)
+except Exception:
+    pass
+
+print(json.dumps({"object": "list",
+                  "data": [{"id": i, "description": d} for i, d in zip(ids, descs)]}))
+')"
+
+  if [[ -z "$catalog_json" || "$catalog_json" == '{"object": "list", "data": []}' ]]; then
+    _cl_die "antigravity: proxy reported no models (is an account healthy?)"
+    return 1
+  fi
 
   local base="$model_override"
   if [[ -z "$base" ]]; then
-    # Build TSV with rate-limit warnings from account data
-    local tsv
-    tsv="$(_CL_ACCOUNTS="$accounts_json" _cl_models_to_tsv "$models_json" "${_CL_PY_SORT}"'
-import json, os, time
-models = json.loads(os.environ["_CL_JSON"])
-accounts = json.loads(os.environ.get("_CL_ACCOUNTS") or "{}")
-rl = {}
-for a in accounts.get("accounts", []):
-    for m, r in (a.get("modelRateLimits") or {}).items():
-        if r.get("isRateLimited"):
-            wait = int((r.get("resetTime", 0) / 1000) - time.time())
-            rl[m] = max(0, wait // 60)
-seen, rows = set(), []
-for m in models.get("data", []):
-    mid = m.get("id", "")
-    if mid in seen: continue
-    seen.add(mid)
-    desc = m.get("description", "") or ""
-    status = ("rate-limited ~%dm" % rl[mid]) if mid in rl else ""
-    rows.append((mid, desc, status))
-rows.sort(key=_nkey)
-for mid, desc, status in rows:
-    print("%s\t%s\t%s" % (mid, desc, status))
-')"
-
-    # Print account summary
-    if [[ -z "${CLAUDELOAD_QUIET:-}" && -n "$accounts_json" ]]; then
-      python3 -c 'import json,sys
-try: d=json.load(sys.stdin)
-except Exception: sys.exit(0)
-s=d.get("summary",{})
-print("  accounts: %d/%d available, %d rate-limited" % (s.get("available",0), s.get("total",0), s.get("rateLimited",0)))
-' <<< "$accounts_json"
-    fi
-
-    base="$(_cl_pick "Antigravity models (:9080)" "$tsv")" \
+    base="$(python3 /home/awcator/bin/ag_picker.py "$catalog_json" "$accounts_json")" \
       || { echo "  cancelled" >&2; return 1; }
   fi
 
-  # Derive fast/subagent companion — same vendor, cheapest capable tier
-  local vendor fast
-  vendor="$(_cl_vendor_of "$base")"
-  # 1. Cheapest capable tier: haiku or mini
-  fast="$(_cl_derive_fast "$all" "^${vendor}.*(haiku|mini)" \
-         'image|embed|compaction|trajectory')"
-  # 2. Flash tier (excluding specialty variants)
-  [[ -z "$fast" ]] && fast="$(_cl_derive_fast "$all" "^${vendor}.*flash" \
-         'high|pro|thinking|image|agent|medium|tiered|embed|lite')"
-  # 3. Sonnet / mid-tier (e.g. Claude on antigravity has only opus+sonnet)
-  [[ -z "$fast" ]] && fast="$(_cl_derive_fast "$all" "^${vendor}.*sonnet")"
-  : "${fast:=$base}"
+  # Use selected base model for fast/subagent companion to guarantee zero rate-limit collisions
+  local fast="$base"
 
   if [[ "$base" == *claude* ]]; then
-    # Vertex/Antigravity rejects max_tokens > 8192 for Claude models
-    export CLAUDE_CODE_MAX_OUTPUT_TOKENS=8192
+    # Cloud Code rejects streamGenerateContent for Claude models above 64000
+    # (400 INVALID_ARGUMENT). Measured: 64000 passes, 100000 fails. The limit
+    # only bites the streaming path, which is the only one Claude Code uses, so
+    # an uncapped value here looks like a random hard failure.
+    export CLAUDE_CODE_MAX_OUTPUT_TOKENS=64000
   else
-    # Keep the global massive limit for Gemini models
+    # Gemini: the proxy caps this to its own GEMINI_MAX_OUTPUT_TOKENS (16384).
     export CLAUDE_CODE_MAX_OUTPUT_TOKENS=128000
   fi
 
   _cl_export_models "$base" "$fast"
-  _cl_log "Loaded: $ANTHROPIC_MODEL (antigravity, :9080)" \
+  _cl_log "Loaded: $ANTHROPIC_MODEL (antigravity, :$AG_PORT)" \
           "— fast/subagent: $ANTHROPIC_SMALL_FAST_MODEL"
 }
 

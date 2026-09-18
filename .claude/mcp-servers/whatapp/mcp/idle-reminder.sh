@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Repeated WhatsApp reminders while Claude Code sits idle waiting for the user.
 #
-# Schedule: 20m, 35m, 40m = text; then call every 3m.
+# Schedule: 30m = text; then call every 30m.
 #
 # Three modes, all called from hooks in ~/.claude/settings.json:
 #   (no args)        Foreground — called by the Notification/idle_prompt hook.
@@ -111,9 +111,9 @@ case "${1:-}" in
     log "loop start pid=$$ project=$project"
 
     # Fixed schedule: gap (seconds) between reminders, and the action for each.
-    # Cumulative texts at 20m, 35m, 40m; after that, call every 3m.
-    delays=(1200 900 300)
-    actions=(text text text)
+    # Text at 30m; after that, call every 30m.
+    delays=(1800)
+    actions=(text)
     idx=0
     elapsed=0
 
@@ -122,7 +122,7 @@ case "${1:-}" in
         delay="${delays[$idx]}"
         action="${actions[$idx]}"
       else
-        delay=180
+        delay=1800
         action=call
       fi
 
