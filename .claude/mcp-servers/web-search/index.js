@@ -163,11 +163,14 @@ server.tool(
       // Navigate to URL and wait for network idle to ensure SPAs load
       let response = await page.goto(url, { waitUntil: 'networkidle2' });
 
-      // Handle simple JS-based WAF challenges (e.g. SambaWiki returning 429 with 'js_ok=1')
-      if (response && response.status() === 429) {
-          const body = await page.content();
-          if (body.includes('js_ok=1')) {
-              response = await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 5000 }).catch(() => response);
+      // Generic WAF bypass: if the initial response is an error (403, 429, 503),
+      // it might be a JS challenge page (Cloudflare, etc.) that will auto-reload.
+      // We give it 5 seconds to execute its JS and navigate to the real page.
+      if (response && !response.ok()) {
+          try {
+              response = await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 5000 });
+          } catch (e) {
+              // Timeout means no auto-reload occurred, proceed with the original response
           }
       }
 
