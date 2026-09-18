@@ -161,7 +161,15 @@ server.tool(
       page.setDefaultNavigationTimeout(15000);
 
       // Navigate to URL and wait for network idle to ensure SPAs load
-      const response = await page.goto(url, { waitUntil: 'networkidle2' });
+      let response = await page.goto(url, { waitUntil: 'networkidle2' });
+
+      // Handle simple JS-based WAF challenges (e.g. SambaWiki returning 429 with 'js_ok=1')
+      if (response && response.status() === 429) {
+          const body = await page.content();
+          if (body.includes('js_ok=1')) {
+              response = await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 5000 }).catch(() => response);
+          }
+      }
 
       if (!response || !response.ok()) {
         await browser.close();
