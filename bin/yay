@@ -572,8 +572,79 @@ Focus on: source authenticity, build process sanity, privilege usage, persistenc
 
     echo -e "  ${DIM}[L4] asking ${_AUR_AI_LABEL}…${RST}" >&2
 
+    echo -e "\n\033[34m╭── You (Automated Security Prompt)\033[0m" >&2
+    echo -e "\033[34m│ \033[90mAnalyzing package: '$pkg'\033[0m" >&2
+    echo -e "\033[34m│ \033[90mIncluded: PKGBUILD, binary analysis, git forensics\033[0m" >&2
+    echo -e "\033[34m╰── \033[90m(Prompt sent: $(echo "$prompt" | wc -c) bytes)\033[0m\n" >&2
+
     result=$( (
-        echo "$prompt" | timeout 300 claude -p 2>/dev/null
+        timeout 300 claude -p "$prompt" --output-format stream-json --include-partial-messages 2>/dev/null | python3 -c '
+import sys, json
+json_acc = ""
+for line in sys.stdin:
+    line = line.strip()
+    if not line.startswith("{"): continue
+    try:
+        d = json.loads(line)
+        if d.get("type") == "stream_event":
+            evt = d.get("event", {})
+            etype = evt.get("type")
+
+            if etype == "content_block_delta":
+                delta = evt.get("delta", {})
+                if delta.get("type") == "text_delta":
+                    text = delta.get("text", "")
+                    sys.stderr.write(text)
+                    sys.stderr.flush()
+                    sys.stdout.write(text)
+                    sys.stdout.flush()
+                elif delta.get("type") == "thinking_delta":
+                    think = delta.get("thinking", "")
+                    sys.stderr.write(f"\033[35m{think}\033[0m")
+                    sys.stderr.flush()
+                elif delta.get("type") == "input_json_delta":
+                    sys.stderr.write("\033[36m.\033[0m")
+                    sys.stderr.flush()
+                    json_acc += delta.get("partial_json", "")
+
+            elif etype == "content_block_start":
+                block = evt.get("content_block", {})
+                if block.get("type") == "tool_use":
+                    tool = block.get("name", "unknown")
+                    if tool.startswith("mcp__"):
+                        tool = tool.split("__")[-1]
+                    sys.stderr.write(f"\n\033[36m╭── \033[1m{tool}\033[0m\n\033[36m│ \033[0m")
+                    sys.stderr.flush()
+                    json_acc = ""
+
+        elif d.get("type") == "user":
+            msg = d.get("message", {})
+            for c in msg.get("content", []):
+                if c.get("type") == "tool_result":
+                    try:
+                        args = json.loads(json_acc)
+                        if "query" in args:
+                            q = args["query"]
+                            sys.stderr.write(f"\n\033[36m│ \033[3mQuery: {q}\033[0m")
+                        elif "url" in args:
+                            u = args["url"]
+                            sys.stderr.write(f"\n\033[36m│ \033[3mURL: {u}\033[0m")
+                    except Exception:
+                        pass
+                    sys.stderr.write("\n\033[36m╰── \033[32m✔ Done\033[0m\n\n")
+
+                    for res_block in c.get("content", []):
+                        if res_block.get("type") == "text":
+                            tool_output = res_block.get("text", "")
+                            sys.stderr.write(f"\033[90m{tool_output}\033[0m\n\n")
+
+                    sys.stderr.flush()
+                    json_acc = ""
+    except Exception:
+        pass
+sys.stderr.write("\n")
+sys.stdout.write("\n")
+'
     ) ) || result=""
 
     if [ -z "$result" ]; then
@@ -607,7 +678,7 @@ Focus on: source authenticity, build process sanity, privilege usage, persistenc
     # "suspicious"/"verdict" colloquially and would trigger a false positive).
     local verdict_word
     verdict_word=$(echo "$result" \
-        | grep -iE '^\s*##?\s*[0-9]*\.?\s*VERDICT' -A3 \
+        | grep -iE '^\s*#+\s*[0-9]*\.?\s*VERDICT' -A3 \
         | grep -oiE '\b(SAFE|SUSPICIOUS|DANGEROUS)\b' \
         | head -1)
 

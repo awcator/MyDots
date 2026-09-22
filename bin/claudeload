@@ -2,7 +2,7 @@
 # claudeload — switch Claude Code backend in current shell
 # Usage: source claudeload <profile> [model]
 #
-# Backends: copilot | windsurf | deepseek | antigravity | aistudio | codexproxy
+# Backends: copilot | junie | windsurf | deepseek | antigravity | aistudio | codexproxy
 # Proxies run foreground in tmux session 'proxies' (spawned only if port is down).
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -106,6 +106,24 @@ _cl_require_litellm() {
     _cl_die "$name: litellm not found! Install via: uv tool install 'litellm[proxy]'"
     return 1
   fi
+}
+
+_cl_require_node_npx() {
+  local name="$1"
+  if ! command -v node >/dev/null 2>&1; then
+    _cl_die "$name: node not found (install Node.js)"
+    return 1
+  fi
+  if ! command -v npx >/dev/null 2>&1; then
+    _cl_die "$name: npx not found (install npm)"
+    return 1
+  fi
+}
+
+_cl_read_junie_api_key() {
+  local v="${JUNIE_API_KEY:-}"
+  [[ -n "$v" ]] || return 1
+  printf '%s' "$v"
 }
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -271,6 +289,83 @@ _cl_backend_copilot() {
   _cl_log "Loaded: $ANTHROPIC_MODEL (copilot, :4141)" \
           "— sonnet: $ANTHROPIC_DEFAULT_SONNET_MODEL," \
           "haiku: $ANTHROPIC_SMALL_FAST_MODEL"
+}
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  Backend: Junie API  (default port 4143, junie-api via npx)
+# ══════════════════════════════════════════════════════════════════════════════
+
+_cl_backend_junie() {
+  local model_override="${1:-}"
+  local port="${JUNIE_PORT:-4143}"
+
+  _cl_clear_env
+  _cl_require_node_npx "junie" || return 1
+
+  local key
+  key="$(_cl_read_junie_api_key)" || {
+    _cl_die "junie: JUNIE_API_KEY not found in environment"
+    return 1
+  }
+
+  export ANTHROPIC_BASE_URL="http://localhost:$port"
+  export ANTHROPIC_AUTH_TOKEN=dummy
+
+  _cl_spawn_proxy junie "$port" \
+    npx --yes junie-api start --auth-token "$key" --port "$port"
+
+  local models_json i
+  for i in {1..20}; do
+    models_json="$(_cl_fetch_json "http://localhost:$port/v1/models")"
+    [[ -n "$models_json" && "$models_json" != "[]" && "$models_json" != '{"object":"list","data":[]}' ]] && break
+    sleep 1
+  done
+
+  if [[ -z "$models_json" || "$models_json" == "[]" || "$models_json" == '{"object":"list","data":[]}' ]]; then
+    _cl_die "junie: couldn't fetch models from :$port"
+    return 1
+  fi
+
+  local tsv
+  tsv="$(_cl_models_to_tsv "$models_json" "${_CL_PY_SORT}"'
+import json, os
+models = json.loads(os.environ["_CL_JSON"]).get("data", [])
+rows = []
+for m in models:
+    mid = m.get("id", "")
+    if not mid:
+        continue
+    # junie-api currently returns 401 for google-chat-* over /v1/messages
+    # in this setup, so hide those from the picker for Claude Code usage.
+    if mid.startswith("google-chat-"):
+        continue
+    desc = m.get("owned_by") or "Junie model"
+    rows.append((mid, desc, ""))
+rows.sort(key=_nkey)
+for mid, desc, status in rows:
+    print("%s\t%s\t%s" % (mid, desc, status))
+')"
+
+  local base
+  base="$(_cl_select_model "Junie models (:$port)" "$tsv" "$model_override")" \
+    || return 1
+
+  local all fast sonnet
+  all="$(echo "$tsv" | cut -f1)"
+  sonnet="$(printf '%s\n' "$all" | \grep -i 'sonnet' | head -1)"
+  fast="$(printf '%s\n' "$all" | \grep -iE 'haiku|mini|flash|lite' | head -1)"
+  # If base is a Claude model, keep all companion roles on Claude to avoid
+  # cross-provider routing that can fail with upstream auth on some IDs.
+  if [[ "$base" == claude-* ]]; then
+    sonnet="$base"
+    fast="$base"
+  fi
+  : "${fast:=$base}" "${sonnet:=$base}"
+
+  _cl_export_models "$base" "$fast" "$sonnet"
+  _cl_log "Loaded: $ANTHROPIC_MODEL (junie, :$port)" \
+          "— sonnet: $ANTHROPIC_DEFAULT_SONNET_MODEL," \
+          "haiku/subagent: $ANTHROPIC_SMALL_FAST_MODEL"
 }
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -816,7 +911,7 @@ for mid, desc, status in rows:
 
 case "${1:-}" in
   ""|menu|m)
-    if _prof="$(_cl_pick "Choose Claude Code backend" $'omniroute\tOmniRoute Server (:20128)\ncodexproxy\tLocal Codex Proxy (Docker, :8081)\nopenai\tOpenAI / ChatGPT via LiteLLM (:9084)\ncopilot\tGitHub Copilot proxy (:4141)\nwindsurf\tWindsurf API proxy (:4142)\ndeepseek\tDeepSeek direct API\nantigravity\tAntigravity account proxy (:9080)\naistudio\tGoogle AI Studio via LiteLLM (:9083)')"; then
+    if _prof="$(_cl_pick "Choose Claude Code backend" $'omniroute\tOmniRoute Server (:20128)\ncodexproxy\tLocal Codex Proxy (Docker, :8081)\nopenai\tOpenAI / ChatGPT via LiteLLM (:9084)\ncopilot\tGitHub Copilot proxy (:4141)\njunie\tJetBrains Junie proxy (:4143)\nwindsurf\tWindsurf API proxy (:4142)\ndeepseek\tDeepSeek direct API\nantigravity\tAntigravity account proxy (:9080)\naistudio\tGoogle AI Studio via LiteLLM (:9083)')"; then
       source "$_CLD_SELF" "$_prof"
     else
       echo "  cancelled" >&2
@@ -824,6 +919,7 @@ case "${1:-}" in
     ;;
 
   copilot|cop|opus)    _cl_backend_copilot   "${2:-}" ;;
+  junie|jb)            _cl_backend_junie     "${2:-}" ;;
   windsurf|ws)         _cl_backend_windsurf  "${2:-}" ;;
   deepseek)            _cl_backend_deepseek  "${2:-}" ;;
   antigravity|ag)      _cl_backend_antigravity "${2:-}" ;;
@@ -842,6 +938,7 @@ claudeload — switch Claude Code backend
 
   (no args)   interactive menu: pick backend → pick model
   copilot     interactive: pick base (port 4141, copilot-api)
+  junie       JetBrains Junie proxy via npx junie-api (default port 4143)
   windsurf    interactive: show catalog+credits, pick base (port 4142, WindsurfAPI)
   deepseek    DeepSeek models (api.deepseek.com)
   antigravity interactive: pick base (port 9080, antigravity-claude-proxy)
