@@ -312,11 +312,15 @@ _cl_backend_junie() {
   export ANTHROPIC_AUTH_TOKEN=dummy
 
   _cl_spawn_proxy junie "$port" \
-    npx --yes junie-api start --auth-token "$key" --port "$port"
+    node ~/Documents/junie-api/dist/main.js start --auth-token "$key" --port "$port"
 
   local models_json i
   for i in {1..20}; do
     models_json="$(_cl_fetch_json "http://localhost:$port/v1/models")"
+    # OmniRoute returns all 600+ models. Filter only those whose provider is active.
+    active_providers=$(omniroute providers list | awk '/active/{print $2}' | paste -sd "," -)
+    models_json=$(echo "$models_json" | jq --arg providers "$active_providers" '.data = [.data[] | select(.owned_by as $o | ($providers | contains($o)) and (.id | test("-low$|-medium$|-high$|-xhigh$|-tiered$|^auto/|/auto$|^kiro/|^gemini-web/") | not))]')
+
     [[ -n "$models_json" && "$models_json" != "[]" && "$models_json" != '{"object":"list","data":[]}' ]] && break
     sleep 1
   done
@@ -426,6 +430,10 @@ _cl_backend_deepseek() {
 
   local models_json
   models_json="$(_cl_fetch_json "https://api.deepseek.com/models" "$ANTHROPIC_API_KEY")"
+    # OmniRoute returns all 600+ models. Filter only those whose provider is active.
+    active_providers=$(omniroute providers list | awk '/active/{print $2}' | paste -sd "," -)
+    models_json=$(echo "$models_json" | jq --arg providers "$active_providers" '.data = [.data[] | select(.owned_by as $o | ($providers | contains($o)) and (.id | test("-low$|-medium$|-high$|-xhigh$|-tiered$|^auto/|/auto$|^kiro/|^gemini-web/") | not))]')
+
   if [[ -z "$models_json" ]]; then
     _cl_die "deepseek: couldn't fetch models from API (is DEEPSEEK_KEY set?)"
     return 1
@@ -507,6 +515,10 @@ _cl_backend_antigravity() {
 
   local models_json accounts_json health_json
   models_json="$(_cl_fetch_json "http://localhost:$AG_PORT/v1/models")"
+    # OmniRoute returns all 600+ models. Filter only those whose provider is active.
+    active_providers=$(omniroute providers list | awk '/active/{print $2}' | paste -sd "," -)
+    models_json=$(echo "$models_json" | jq --arg providers "$active_providers" '.data = [.data[] | select(.owned_by as $o | ($providers | contains($o)) and (.id | test("-low$|-medium$|-high$|-xhigh$|-tiered$|^auto/|/auto$|^kiro/|^gemini-web/") | not))]')
+
   accounts_json="$(_cl_fetch_json "http://localhost:$AG_PORT/api/accounts")"
   health_json="$(_cl_fetch_json "http://localhost:$AG_PORT/health")"
 
@@ -602,6 +614,10 @@ _cl_backend_aistudio() {
 
   local models_json
   models_json="$(_cl_fetch_json \
+    # OmniRoute returns all 600+ models. Filter only those whose provider is active.
+    active_providers=$(omniroute providers list | awk '/active/{print $2}' | paste -sd "," -)
+    models_json=$(echo "$models_json" | jq --arg providers "$active_providers" '.data = [.data[] | select(.owned_by as $o | ($providers | contains($o)) and (.id | test("-low$|-medium$|-high$|-xhigh$|-tiered$|^auto/|/auto$|^kiro/|^gemini-web/") | not))]')
+
     "https://generativelanguage.googleapis.com/v1beta/models?key=$GEMINI_API_KEY")"
   if [[ -z "$models_json" ]]; then
     _cl_die "aistudio: couldn't fetch models from API (is GEMINI_API_KEY valid?)"
@@ -674,6 +690,10 @@ _cl_backend_openai() {
 
   local models_json
   models_json="$(_cl_fetch_json "https://api.openai.com/v1/models" "$OPENAI_API_KEY")"
+    # OmniRoute returns all 600+ models. Filter only those whose provider is active.
+    active_providers=$(omniroute providers list | awk '/active/{print $2}' | paste -sd "," -)
+    models_json=$(echo "$models_json" | jq --arg providers "$active_providers" '.data = [.data[] | select(.owned_by as $o | ($providers | contains($o)) and (.id | test("-low$|-medium$|-high$|-xhigh$|-tiered$|^auto/|/auto$|^kiro/|^gemini-web/") | not))]')
+
   if [[ -z "$models_json" ]]; then
     _cl_die "openai: couldn't fetch models from API (is OPENAI_API_KEY valid?)"
     return 1
@@ -783,7 +803,15 @@ _cl_backend_codexproxy() {
   local models_json i
   for i in {1..15}; do
     models_json="$(_cl_fetch_json "$base_url/v1/models/catalog" "$key")"
+    # OmniRoute returns all 600+ models. Filter only those whose provider is active.
+    active_providers=$(omniroute providers list | awk '/active/{print $2}' | paste -sd "," -)
+    models_json=$(echo "$models_json" | jq --arg providers "$active_providers" '.data = [.data[] | select(.owned_by as $o | ($providers | contains($o)) and (.id | test("-low$|-medium$|-high$|-xhigh$|-tiered$|^auto/|/auto$|^kiro/|^gemini-web/") | not))]')
+
     [[ -z "$models_json" ]] && models_json="$(_cl_fetch_json "$base_url/v1/models" "$key")"
+    # OmniRoute returns all 600+ models. Filter only those whose provider is active.
+    active_providers=$(omniroute providers list | awk '/active/{print $2}' | paste -sd "," -)
+    models_json=$(echo "$models_json" | jq --arg providers "$active_providers" '.data = [.data[] | select(.owned_by as $o | ($providers | contains($o)) and (.id | test("-low$|-medium$|-high$|-xhigh$|-tiered$|^auto/|/auto$|^kiro/|^gemini-web/") | not))]')
+
     [[ -n "$models_json" && "$models_json" != "[]" && "$models_json" != '{"object":"list","data":[]}' ]] && break
     sleep 1
   done
@@ -856,6 +884,10 @@ _cl_backend_omniroute() {
   local models_json i
   for i in {1..15}; do
     models_json="$(_cl_fetch_json "http://localhost:20128/v1/models" "$ANTHROPIC_API_KEY")"
+    # OmniRoute returns all 600+ models. Filter only those whose provider is active.
+    active_providers=$(omniroute providers list | awk '/active/{print $2}' | paste -sd "," -)
+    models_json=$(echo "$models_json" | jq --arg providers "$active_providers" '.data = [.data[] | select(.owned_by as $o | ($providers | contains($o)) and (.id | test("-low$|-medium$|-high$|-xhigh$|-tiered$|^auto/|/auto$|^kiro/|^gemini-web/") | not))]')
+
     [[ -n "$models_json" && "$models_json" != "[]" && "$models_json" != '{"object":"list","data":[]}' ]] && break
     sleep 1
   done
