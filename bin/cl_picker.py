@@ -130,7 +130,7 @@ def render_ui(items, selected_idx, scroll_offset, filter_text, heading_title):
     lines.append(C_BORDER + "║" + RESET + keys_help + " " * max(0, pad) + C_BORDER + "║" + RESET)
     lines.append(C_BORDER + "╚" + "═" * (tw - 2) + "╝" + RESET)
 
-    write_tty("\033[H\033[J" + "\n".join(lines) + "\n")
+    write_tty("\033[H\033[2J" + "\n".join(lines) + "\n")
     return visible, selected_idx, scroll_offset
 
 def read_key():
@@ -162,7 +162,7 @@ def main():
         
     heading_title = sys.argv[1] if len(sys.argv) > 1 else "Picker"
 
-    write_tty("\033[?25l")
+    write_tty("\033[?1049h\033[?25l")
     selected_idx = 0
     scroll_offset = 0
     filter_text = ""
@@ -185,7 +185,6 @@ def main():
                 selected_idx = min(len(visible) - 1, selected_idx + 10)
             elif key in ("\r", "\n"):
                 if visible:
-                    write_tty("\033[?25h\033[H\033[J")
                     sys.stdout.write(visible[selected_idx][0])
                     sys.stdout.flush()
                     sys.exit(0)
@@ -199,14 +198,13 @@ def main():
                     selected_idx = 0
                     scroll_offset = 0
                 else:
-                    write_tty("\033[?25h\033[H\033[J")
                     sys.exit(1)
             elif len(key) == 1 and key.isprintable():
                 filter_text += key
                 selected_idx = 0
                 scroll_offset = 0
     finally:
-        write_tty("\033[?25h")
+        write_tty("\033[?25h\033[?1049l")
 
 if __name__ == "__main__":
     main()
