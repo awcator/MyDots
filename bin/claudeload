@@ -99,6 +99,17 @@ _cl_spawn_proxy() {
 #  Data Helpers
 # ══════════════════════════════════════════════════════════════════════════════
 
+_cl_require_litellm() {
+  local name="$1"
+  command -v litellm >/dev/null 2>&1 || export PATH="$PATH:$HOME/.local/bin"
+  if ! command -v litellm >/dev/null 2>&1; then
+    _cl_die "$name: litellm not found! Install via: uv tool install 'litellm[proxy]'"
+    return 1
+  fi
+}
+
+# ══════════════════════════════════════════════════════════════════════════════
+
 # Fetch JSON from a URL with optional Authorization header.
 _cl_fetch_json() {
   local url="$1" auth="${2:-}"
@@ -118,7 +129,14 @@ _cl_filter_chat_models() {
 #   _cl_models_to_tsv <json> <python_code>
 # Extra env vars can be prepended by the caller (e.g. _CL_EXTRA="val" _cl_models_to_tsv ...).
 _cl_models_to_tsv() {
-  _CL_JSON="$1" python3 -c "$2"
+  local tmp_json
+  tmp_json="$(mktemp)"
+  printf "%s" "$1" > "$tmp_json"
+  _CL_JSON_FILE="$tmp_json" python3 -c "import os; os.environ['_CL_JSON'] = open(os.environ['_CL_JSON_FILE']).read();"$'
+'"$2"
+  local rc=$?
+  rm -f "$tmp_json"
+  return $rc
 }
 
 # Natural-sort + pick the last match from a newline-separated list.
@@ -152,40 +170,14 @@ _cl_vendor_of() {
 # Returns 1 if the user quits.
 _cl_pick() {
   local title="$1" tsv="$2"
-  local ids=() labs=() sts=()
-  local id lab st
-  while IFS=$'\t' read -r id lab st; do
-    [[ -z "$id" ]] && continue
-    ids+=("$id"); labs+=("$lab"); sts+=("$st")
-  done <<< "$tsv"
-
-  local n=${#ids[@]}
-  (( n == 0 )) && return 1
-
-  printf '%b\n%b\n' "${_CL_B}${_CL_C}╭─ ${title}${_CL_0}" \
-                     "${_CL_D}│  ${n} available${_CL_0}" >&2
-  local i mark
-  for ((i=0; i<n; i++)); do
-    mark=""
-    [[ -n "${sts[$i]}" ]] && mark="  ${_CL_R}⚠ ${sts[$i]}${_CL_0}"
-    printf '%b│ %2s) %b%-34s%b%s\n' \
-      "${_CL_C}" "$((i+1))" "${_CL_B}" "${ids[$i]}" "${_CL_0}" "$mark" >&2
-    [[ -n "${labs[$i]}" && "${labs[$i]}" != "${ids[$i]}" ]] && \
-      printf '%b│      %s%b\n' "${_CL_D}" "${labs[$i]}" "${_CL_0}" >&2
-  done
-  printf '%b\n' "${_CL_C}╰────────────────────────────────────────${_CL_0}" >&2
-
-  local sel
-  while :; do
-    printf '%b' "${_CL_B}  Select 1-${n}  ${_CL_D}(q cancels)${_CL_0}: " >&2
-    read -r sel
-    [[ "$sel" == [qQ] ]] && return 1
-    if [[ "$sel" =~ ^[0-9]+$ ]] && (( sel >= 1 && sel <= n )); then
-      printf '%s' "${ids[$((sel-1))]}"
-      return 0
-    fi
-    printf '%b\n' "${_CL_R}  invalid choice${_CL_0}" >&2
-  done
+  local out
+  out="$(printf '%s' "$tsv" | python3 "$HOME/Documents/MyDots/bin/cl_picker.py" "$title")"
+  local rc=$?
+  if [[ $rc -eq 0 && -n "$out" ]]; then
+    printf '%s' "$out"
+    return 0
+  fi
+  return 1
 }
 
 _cl_print_status() {
@@ -475,11 +467,12 @@ print(json.dumps({"object": "list",
     return 1
   fi
 
-  local base="$model_override"
-  if [[ -z "$base" ]]; then
-    base="$(python3 /home/awcator/bin/ag_picker.py "$catalog_json" "$accounts_json")" \
-      || { echo "  cancelled" >&2; return 1; }
-  fi
+  local tsv
+  tsv="$(python3 "$HOME/Documents/MyDots/bin/ag_format.py" "$catalog_json" "$accounts_json")"
+  
+  local base
+  base="$(_cl_select_model "Antigravity models (:$AG_PORT)" "$tsv" "$model_override")" \
+    || return 1
 
   # Use selected base model for fast/subagent companion to guarantee zero rate-limit collisions
   local fast="$base"
@@ -514,12 +507,7 @@ _cl_backend_aistudio() {
     return 1
   fi
 
-  # Ensure litellm is on PATH
-  command -v litellm >/dev/null 2>&1 || export PATH="$PATH:$HOME/.local/bin"
-  if ! command -v litellm >/dev/null 2>&1; then
-    _cl_die "aistudio: litellm not found! Install via: uv tool install 'litellm[proxy]'"
-    return 1
-  fi
+  _cl_require_litellm "aistudio" || return 1
 
   local models_json
   models_json="$(_cl_fetch_json \
@@ -586,21 +574,12 @@ _cl_backend_openai() {
 
   _cl_clear_env
 
-  if [[ -f "$HOME/.otp_secrets" ]]; then
-    source "$HOME/.otp_secrets"
-  fi
-
   if [[ -z "${OPENAI_API_KEY:-}" ]]; then
-    _cl_die "openai: OPENAI_API_KEY not found in env or ~/.otp_secrets"
+    _cl_die "openai: OPENAI_API_KEY not found in env"
     return 1
   fi
 
-  # Ensure litellm is on PATH
-  command -v litellm >/dev/null 2>&1 || export PATH="$PATH:$HOME/.local/bin"
-  if ! command -v litellm >/dev/null 2>&1; then
-    _cl_die "openai: litellm not found! Install via: uv tool install 'litellm[proxy]'"
-    return 1
-  fi
+  _cl_require_litellm "openai" || return 1
 
   local models_json
   models_json="$(_cl_fetch_json "https://api.openai.com/v1/models" "$OPENAI_API_KEY")"
@@ -764,12 +743,80 @@ for mid, desc, status in rows:
 }
 
 # ══════════════════════════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════════════════════════
+#  Backend: OmniRoute  (port 20128, omniroute serve)
+# ══════════════════════════════════════════════════════════════════════════════
+
+_cl_backend_omniroute() {
+  local model_override="${1:-}"
+
+  _cl_clear_env
+
+  if [[ -z "${OMNIROUTE_KEY:-}" ]]; then
+    _cl_warn "omniroute: OMNIROUTE_KEY not found in env (continuing anyway)"
+  fi
+
+  export ANTHROPIC_BASE_URL="http://localhost:20128/v1"
+  export ANTHROPIC_API_KEY="${OMNIROUTE_KEY:-sk-dummy}"
+  export CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1
+
+  _cl_spawn_proxy omniroute 20128 omniroute serve --log --no-open
+
+  local models_json i
+  for i in {1..15}; do
+    models_json="$(_cl_fetch_json "http://localhost:20128/v1/models" "$ANTHROPIC_API_KEY")"
+    [[ -n "$models_json" && "$models_json" != "[]" && "$models_json" != '{"object":"list","data":[]}' ]] && break
+    sleep 1
+  done
+
+  if [[ -z "$models_json" || "$models_json" == "[]" || "$models_json" == '{"object":"list","data":[]}' ]]; then
+    _cl_die "omniroute: couldn't fetch models from :20128"
+    return 1
+  fi
+
+  local tsv
+  tsv="$(_cl_models_to_tsv "$models_json" "${_CL_PY_SORT}"'
+import json, os
+try:
+    payload = json.loads(os.environ["_CL_JSON"])
+    models = payload.get("data", []) if isinstance(payload, dict) else payload
+except Exception:
+    models = []
+rows = []
+for m in models:
+    if isinstance(m, dict):
+        mid = m.get("id", "")
+        if not mid:
+            continue
+        desc = m.get("name") or mid or "OmniRoute model"
+        rows.append((mid, desc, ""))
+rows.sort(key=_nkey)
+for mid, desc, status in rows:
+    print("%s\t%s\t%s" % (mid, desc, status))
+')"
+
+  local base
+  base="$(_cl_select_model "OmniRoute models (:20128)" "$tsv" "$model_override")" \
+    || return 1
+
+  local all fast sonnet
+  all="$(echo "$tsv" | cut -f1)"
+  sonnet="$(printf '%s\n' "$all" | \grep -i 'sonnet' | head -1)"
+  fast="$(printf '%s\n' "$all" | \grep -iE 'haiku|mini|flash|lite' | head -1)"
+  : "${fast:=$base}" "${sonnet:=$base}"
+
+  _cl_export_models "$base" "$fast" "$sonnet"
+  _cl_log "Loaded: $ANTHROPIC_MODEL (omniroute, :20128)" \
+          "— sonnet: $ANTHROPIC_DEFAULT_SONNET_MODEL," \
+          "haiku/subagent: $ANTHROPIC_SMALL_FAST_MODEL"
+}
+
 #  Main Dispatch
 # ══════════════════════════════════════════════════════════════════════════════
 
 case "${1:-}" in
   ""|menu|m)
-    if _prof="$(_cl_pick "Choose Claude Code backend" $'codexproxy\tLocal Codex Proxy (Docker, :8081)\nopenai\tOpenAI / ChatGPT via LiteLLM (:9084)\ncopilot\tGitHub Copilot proxy (:4141)\nwindsurf\tWindsurf API proxy (:4142)\ndeepseek\tDeepSeek direct API\nantigravity\tAntigravity account proxy (:9080)\naistudio\tGoogle AI Studio via LiteLLM (:9083)')"; then
+    if _prof="$(_cl_pick "Choose Claude Code backend" $'omniroute\tOmniRoute Server (:20128)\ncodexproxy\tLocal Codex Proxy (Docker, :8081)\nopenai\tOpenAI / ChatGPT via LiteLLM (:9084)\ncopilot\tGitHub Copilot proxy (:4141)\nwindsurf\tWindsurf API proxy (:4142)\ndeepseek\tDeepSeek direct API\nantigravity\tAntigravity account proxy (:9080)\naistudio\tGoogle AI Studio via LiteLLM (:9083)')"; then
       source "$_CLD_SELF" "$_prof"
     else
       echo "  cancelled" >&2
@@ -783,6 +830,7 @@ case "${1:-}" in
   aistudio|ai)         _cl_backend_aistudio  "${2:-}" ;;
   openai|chatgpt|oai)  _cl_backend_openai    "${2:-}" ;;
   codexproxy|codex-proxy|codex|cp) _cl_backend_codexproxy "${2:-}" ;;
+  omniroute|or)        _cl_backend_omniroute "${2:-}" ;;
 
   status|s)
     _cl_print_status
@@ -800,6 +848,7 @@ claudeload — switch Claude Code backend
   aistudio    Google AI Studio via litellm (port 9083)
   openai      OpenAI / ChatGPT via litellm (port 9084)
   codexproxy  Codex Proxy via Docker (port 8081; live Codex model picker)
+  omniroute   OmniRoute server (:20128, omniroute serve)
   status      show current config
 
 Usage: source claudeload <profile> [model]
