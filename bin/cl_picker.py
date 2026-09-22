@@ -63,7 +63,6 @@ def render_ui(items, selected_idx, scroll_offset, filter_text, heading_title):
     
     if filter_text:
         visible = [m for m in items if filter_text.lower() in m[0].lower() or filter_text.lower() in m[1].lower()]
-        if not visible: visible = items
     else:
         visible = items
 
@@ -113,6 +112,11 @@ def render_ui(items, selected_idx, scroll_offset, filter_text, heading_title):
             row_content += " " * pad_len
 
         lines.append(C_BORDER + "║" + RESET + row_content + C_BORDER + "║" + RESET)
+
+    if total_vis == 0:
+        msg = f"  {C_WARN}No matches found for '{filter_text}'{RESET}"
+        pad_len = max(0, tw - 2 - vis_len(strip_ansi(msg)))
+        lines.append(C_BORDER + "║" + RESET + msg + " " * pad_len + C_BORDER + "║" + RESET)
 
     if total_vis > max_rows:
         end_idx = min(scroll_offset + max_rows, total_vis)
@@ -180,10 +184,11 @@ def main():
             elif key == "PGDN":
                 selected_idx = min(len(visible) - 1, selected_idx + 10)
             elif key in ("\r", "\n"):
-                write_tty("\033[?25h\033[H\033[J")
-                sys.stdout.write(visible[selected_idx][0])
-                sys.stdout.flush()
-                sys.exit(0)
+                if visible:
+                    write_tty("\033[?25h\033[H\033[J")
+                    sys.stdout.write(visible[selected_idx][0])
+                    sys.stdout.flush()
+                    sys.exit(0)
             elif key in ("\x7f", "\x08"):
                 filter_text = filter_text[:-1]
                 selected_idx = 0
