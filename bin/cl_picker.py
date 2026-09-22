@@ -58,7 +58,7 @@ def get_termsize():
     except Exception:
         return 100, 30
 
-def render_ui(items, selected_idx, scroll_offset, filter_text, is_filtering, heading_title):
+def render_ui(items, selected_idx, scroll_offset, filter_text, heading_title):
     tw, th = get_termsize()
     
     if filter_text:
@@ -81,11 +81,11 @@ def render_ui(items, selected_idx, scroll_offset, filter_text, is_filtering, hea
     hdr += "═" * max(0, tw - vis_len(strip_ansi(hdr)) - 1) + "╗" + RESET
     lines.append(hdr)
 
-    if filter_text or is_filtering:
-        cur = "▌" if is_filtering else ""
+    if True:
+        cur = "▌"
         fbar = (C_BORDER + "║" + RESET + "  " + C_WARN + " Search: " + RESET +
                 BOLD + filter_text + cur + RESET +
-                (DIM + "  (ESC clear · Enter lock)" + RESET if is_filtering else ""))
+                DIM + "  (type to fuzzy search)" + RESET)
         pad = tw - 1 - vis_len(strip_ansi(fbar))
         lines.append(fbar + " " * max(0, pad) + C_BORDER + "║" + RESET)
         lines.append(C_BORDER + "╠" + "═" * (tw - 2) + "╣" + RESET)
@@ -121,7 +121,7 @@ def render_ui(items, selected_idx, scroll_offset, filter_text, is_filtering, hea
         lines.append(C_BORDER + "║" + RESET + hint + " " * max(0, pad) + C_BORDER + "║" + RESET)
 
     lines.append(C_BORDER + "╠" + "═" * (tw - 2) + "╣" + RESET)
-    keys_help = DIM + "  ↑/↓: nav   Enter: pick   /: search   q: cancel" + RESET
+    keys_help = DIM + "  ↑/↓: nav   Enter: pick   ESC: clear/quit" + RESET
     pad = tw - 1 - vis_len(strip_ansi(keys_help))
     lines.append(C_BORDER + "║" + RESET + keys_help + " " * max(0, pad) + C_BORDER + "║" + RESET)
     lines.append(C_BORDER + "╚" + "═" * (tw - 2) + "╝" + RESET)
@@ -162,51 +162,44 @@ def main():
     selected_idx = 0
     scroll_offset = 0
     filter_text = ""
-    is_filtering = False
-
+    
     try:
         while True:
             visible, selected_idx, scroll_offset = render_ui(
-                items, selected_idx, scroll_offset, filter_text, is_filtering, heading_title
+                items, selected_idx, scroll_offset, filter_text, heading_title
             )
 
             key = read_key()
 
-            if is_filtering:
-                if key in ("\r", "\n"):
-                    is_filtering = False
-                elif key in ("\x7f", "\x08"):
-                    filter_text = filter_text[:-1]
-                elif key in ("\x1b", "q"):
-                    filter_text = ""
-                    is_filtering = False
-                elif len(key) == 1 and key.isprintable():
-                    filter_text += key
-                    selected_idx = 0
-                    scroll_offset = 0
-                continue
-
-            if key in ("UP", "k"):
+            if key in ("UP",):
                 selected_idx = max(0, selected_idx - 1)
-            elif key in ("DOWN", "j"):
+            elif key in ("DOWN",):
                 selected_idx = min(len(visible) - 1, selected_idx + 1)
             elif key == "PGUP":
                 selected_idx = max(0, selected_idx - 10)
             elif key == "PGDN":
                 selected_idx = min(len(visible) - 1, selected_idx + 10)
-            elif key in ("\r", "\n", " "):
+            elif key in ("\r", "\n"):
                 write_tty("\033[?25h\033[H\033[J")
                 sys.stdout.write(visible[selected_idx][0])
                 sys.stdout.flush()
                 sys.exit(0)
-            elif key == "/":
-                is_filtering = True
-                filter_text = ""
+            elif key in ("\x7f", "\x08"):
+                filter_text = filter_text[:-1]
                 selected_idx = 0
                 scroll_offset = 0
-            elif key in ("q", "Q", "\x03", "\x1b", ""):
-                write_tty("\033[?25h\033[H\033[J")
-                sys.exit(1)
+            elif key in ("\x03", "\x1b", ""):
+                if filter_text and key == "\x1b":
+                    filter_text = ""
+                    selected_idx = 0
+                    scroll_offset = 0
+                else:
+                    write_tty("\033[?25h\033[H\033[J")
+                    sys.exit(1)
+            elif len(key) == 1 and key.isprintable():
+                filter_text += key
+                selected_idx = 0
+                scroll_offset = 0
     finally:
         write_tty("\033[?25h")
 
