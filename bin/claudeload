@@ -335,10 +335,6 @@ for m in models:
     mid = m.get("id", "")
     if not mid:
         continue
-    # junie-api currently returns 401 for google-chat-* over /v1/messages
-    # in this setup, so hide those from the picker for Claude Code usage.
-    if mid.startswith("google-chat-"):
-        continue
     desc = m.get("owned_by") or "Junie model"
     rows.append((mid, desc, ""))
 rows.sort(key=_nkey)
