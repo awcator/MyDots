@@ -159,7 +159,17 @@
     "command": "~/.claude/statusline.sh",
     "padding": 2
   },
-  "enabledPlugins": {},
+  "enabledPlugins": {
+    "ponytail@ponytail": true
+  },
+  "extraKnownMarketplaces": {
+    "ponytail": {
+      "source": {
+        "source": "github",
+        "repo": "DietrichGebert/ponytail"
+      }
+    }
+  },
   "effortLevel": "medium",
   "awaySummaryEnabled": true,
   "tui": "fullscreen",
