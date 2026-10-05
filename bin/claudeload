@@ -384,22 +384,13 @@ _cl_backend_windsurf() {
     return 1
   fi
 
-  # Show the full catalog + live credit/pricing table
-  claudecredits
-  echo ""
+  local tsv
+  tsv="$(claudecredits --raw 2>/dev/null | awk -F'\t' '{printf "%s\t%s\t%s cr\n", $1, $3, $2}')"
+  [[ -z "$tsv" ]] && { _cl_die "windsurf: couldn't fetch model catalog"; return 1; }
 
-  local base="$model_override"
-  if [[ -z "$base" ]]; then
-    local models
-    mapfile -t models < <(claudecredits --raw 2>/dev/null | \grep $'\t' | cut -f1)
-    if [[ ${#models[@]} -eq 0 ]]; then
-      _cl_die "windsurf: couldn't fetch model catalog"
-      return 1
-    fi
-    echo "Pick a base model (selector from the table above):"
-    PS3="  model> "
-    select base in "${models[@]}"; do [[ -n "$base" ]] && break; done
-  fi
+  local base
+  base="$(_cl_select_model "Windsurf models (:4142)" "$tsv" "$model_override")" \
+    || return 1
 
   # Cheapest same-vendor model for the haiku/fast slot
   local vendor fast
@@ -914,12 +905,65 @@ for mid, desc, status in rows:
           "haiku/subagent: $ANTHROPIC_SMALL_FAST_MODEL"
 }
 
+# ══════════════════════════════════════════════════════════════════════════════
+#  Backend: Strata  (port 8080, run-coder-iq1_m.sh)
+# ══════════════════════════════════════════════════════════════════════════════
+
+_cl_backend_strata() {
+  local model_override="${1:-}"
+
+  _cl_clear_env
+
+  export ANTHROPIC_BASE_URL=http://127.0.0.1:8080
+  export ANTHROPIC_AUTH_TOKEN=test
+
+  _cl_spawn_proxy strata 8080 \
+    bash -c 'cd /home/awcator/Documents/A/Strata && exec ./run-coder-iq1_m.sh'
+
+  local models_json i
+  for i in {1..15}; do
+    models_json="$(_cl_fetch_json "http://127.0.0.1:8080/v1/models")"
+    [[ -n "$models_json" && "$models_json" != "[]" && "$models_json" != '{"object":"list","data":[]}' ]] && break
+    sleep 1
+  done
+
+  if [[ -z "$models_json" || "$models_json" == "[]" || "$models_json" == '{"object":"list","data":[]}' ]]; then
+    _cl_die "strata: couldn't fetch models from :8080"
+    return 1
+  fi
+
+  local tsv
+  tsv="$(_cl_models_to_tsv "$models_json" "${_CL_PY_SORT}"'
+import json, os
+try:
+    models = json.loads(os.environ["_CL_JSON"]).get("data", [])
+except Exception:
+    models = []
+rows = []
+for m in models:
+    mid = m.get("id", "")
+    if not mid: continue
+    rows.append((mid, "Strata local model", ""))
+rows.sort(key=_nkey)
+for mid, desc, status in rows:
+    print("%s\t%s\t%s" % (mid, desc, status))
+')"
+
+  local base
+  base="$(_cl_select_model "Strata models (:8080)" "$tsv" "$model_override")" \
+    || return 1
+
+  _cl_export_models "$base"
+
+  _cl_log "Loaded: $ANTHROPIC_MODEL (strata, :8080)"
+}
+
 #  Main Dispatch
 # ══════════════════════════════════════════════════════════════════════════════
 
 case "${1:-}" in
   ""|menu|m)
-    if _prof="$(_cl_pick "Choose Claude Code backend" $'omniroute\tOmniRoute Server (:20128)\ncodexproxy\tLocal Codex Proxy (Docker, :8081)\nopenai\tOpenAI / ChatGPT via LiteLLM (:9084)\ncopilot\tGitHub Copilot proxy (:4141)\njunie\tJetBrains Junie proxy (:4143)\nwindsurf\tWindsurf API proxy (:4142)\ndeepseek\tDeepSeek direct API\nantigravity\tAntigravity account proxy (:9080)\naistudio\tGoogle AI Studio via LiteLLM (:9083)')"; then
+    if _prof="$(_cl_pick "Choose Claude Code backend" $'omniroute\tOmniRoute Server (:20128)\nstrata\tStrata local Qwen Coder (:8080)\ncodexproxy\tLocal Codex Proxy (Docker, :8081)\nopenai\tOpenAI / ChatGPT via LiteLLM (:9084)\ncopilot\tGitHub Copilot proxy (:4141)\njunie\tJetBrains Junie proxy (:4143)\nwindsurf\tWindsurf API proxy (:4142)\ndeepseek\tDeepSeek direct API\nantigravity\tAntigravity account proxy (:9080)\naistudio\tGoogle AI Studio via LiteLLM (:9083)')"; then
       source "$_CLD_SELF" "$_prof"
     else
       echo "  cancelled" >&2
@@ -935,6 +979,7 @@ case "${1:-}" in
   openai|chatgpt|oai)  _cl_backend_openai    "${2:-}" ;;
   codexproxy|codex-proxy|codex|cp) _cl_backend_codexproxy "${2:-}" ;;
   omniroute|or)        _cl_backend_omniroute "${2:-}" ;;
+  strata|st)           _cl_backend_strata    "${2:-}" ;;
 
   status|s)
     _cl_print_status
@@ -954,6 +999,7 @@ claudeload — switch Claude Code backend
   openai      OpenAI / ChatGPT via litellm (port 9084)
   codexproxy  Codex Proxy via Docker (port 8081; live Codex model picker)
   omniroute   OmniRoute server (:20128, omniroute serve)
+  strata      Strata local Qwen Coder model (:8080)
   status      show current config
 
 Usage: source claudeload <profile> [model]
