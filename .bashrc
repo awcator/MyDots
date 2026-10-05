@@ -157,3 +157,5 @@ case ":$PATH:" in
   *":$HOME/.claude-code-router/bin:"*) ;;
   *) export PATH="$HOME/.claude-code-router/bin:$PATH" ;;
 esac
+
+source ~/.env
