@@ -429,7 +429,7 @@ exec --no-startup-id pgrep -x volumeicon || volumeicon
 exec --no-startup-id sleep 30 && echo {0..10} | xargs -d ' ' -I {} sh -c "sleep 5; pactl set-source-mute {} 0; pactl set-source-mute {} 1;"
 exec --no-startup-id pgrep -x copyq || copyq
 bindsym Control+Mod1+h exec --no-startup-id copyq show
-for_window [instance="copyq"] floating enable, sticky enable, border none, move position center, resize set 260 px 500 px
+for_window [instance="copyq"] floating enable, sticky enable, border none, move position center, resize set 1200 px 500 px
 # exec --no-startup-id i3-battery-popup  -n -I 2% -L 20% -s ~/audio/i3-battery-popup.wav -v 30
 exec --no-startup-id i3-battery-popup  -n -I 2% -L 20% -v 30
 exec --no-startup-id pgrep -x dunst || dunst
