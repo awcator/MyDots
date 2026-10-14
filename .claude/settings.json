@@ -17,7 +17,7 @@
   },
   "permissions": {
     "allow": [
-      "Bash(.*:*)",
+      "Bash(*)",
       "Edit",
       "Write",
       "Read",
