@@ -38,6 +38,9 @@ _cl_clear_env() {
   # DeepSeek deliberately sets this to low. Do not carry that constraint into
   # another backend, where it can silently reduce Codex reasoning quality.
   unset CLAUDE_CODE_EFFORT_LEVEL
+  # Only a backend that knows its model's window (strata) declares this; carry
+  # it across a switch and Claude Code sizes every later model to that window.
+  unset CLAUDE_CODE_MAX_CONTEXT_TOKENS
 }
 
 # Export the six model env vars Claude Code uses.
@@ -918,7 +921,7 @@ _cl_backend_strata() {
   export ANTHROPIC_AUTH_TOKEN=test
 
   _cl_spawn_proxy strata 8080 \
-    bash -c 'cd /home/awcator/Documents/A/Strata && exec ./run-coder-iq1_m.sh'
+    bash -c 'cd /home/awcator/Documents/Strata && exec ./run-uncensored.sh'
 
   local models_json i
   for i in {1..15}; do
@@ -955,7 +958,14 @@ for mid, desc, status in rows:
 
   _cl_export_models "$base"
 
-  _cl_log "Loaded: $ANTHROPIC_MODEL (strata, :8080)"
+  # Claude Code never asks a gateway for the window: an unrecognised model ID
+  # is assumed to be 200k.  Declare the engine's real one, so the context meter
+  # and proactive auto-compaction both use it.  Keep this equal to the config's
+  # --max-context (strata-uncensored-ud-q4_k_xl.json).
+  export CLAUDE_CODE_MAX_CONTEXT_TOKENS=131072
+
+  _cl_log "Loaded: $ANTHROPIC_MODEL (strata, :8080)" \
+          "— context: $CLAUDE_CODE_MAX_CONTEXT_TOKENS (declared)"
 }
 
 #  Main Dispatch
@@ -1012,6 +1022,11 @@ esac
 export DISABLE_NON_ESSENTIAL_MODEL_CALLS=1
 export CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
 # Third-party proxy models aren't in Claude Code's built-in registry, so it
-# can't guess their context window.  This restores the "ask the API" behavior
-# instead of warning + assuming 200k.
-export CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT=1
+# can't guess their context window.  A backend that knows its window declares
+# CLAUDE_CODE_MAX_CONTEXT_TOKENS (strata does); that keys proactive compaction
+# off the real window.  This switch instead stops compaction until the API
+# refuses a request with an error Claude Code recognises - and a gateway can
+# word that error so it never does.  Only fall back to it with no window.
+if [[ -z "${CLAUDE_CODE_MAX_CONTEXT_TOKENS:-}" ]]; then
+  export CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT=1
+fi
