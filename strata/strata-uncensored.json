@@ -1,0 +1,27 @@
+{
+  "exe": "engine/strata",
+  "args": [
+    "--pack", "packs/uncensored-ud-q4_k_xl",
+    "--native", "/run/media/awcator/Lindos/Strata-data/models/uncensored-ud-q4_k_xl/Qwen3.8-Flash-Next-Uncensored-Gufo-00001-of-00005.gguf",
+    "--resident-budget-gib", "100",
+    "--expert-profile", "data/expert-profile.bin", "--expert-cache", "auto",
+    "--prefill", "auto:262144", "--spec", "4", "--spec-min-p", "0.5",
+    "--mtp", "/run/media/awcator/Lindos/Strata-data/mtp/rt", "--max-context", "262144", "--kv", "int8",
+    "--vision", "--vram-reserve-mib", "1400", "--kv-resident", "20480",
+    "--mmap-experts", "--resident-cpu-experts"
+  ],
+  "cwd": ".",
+  "tokenizer": "packs/uncensored-ud-q4_k_xl/tokenizer",
+  "model_name": "qwen3.8-flash-next-uncensored-ud-q4_k_xl",
+  "log": "strata-uncensored.log",
+  "host": "127.0.0.1",
+  "port": 8080,
+  "fit_max_tokens": true,
+  "vision": {
+    "exe": "engine/strata-vision",
+    "mmproj": "/run/media/awcator/Lindos/Strata-data/models/vision/mmproj-Qwen3.8-Flash-Next-BF16.gguf",
+    "model": "/run/media/awcator/Lindos/Strata-data/models/uncensored-ud-q4_k_xl/Qwen3.8-Flash-Next-Uncensored-Gufo-00001-of-00005.gguf",
+    "gpu": true,
+    "max_tokens": 32768
+  }
+}
