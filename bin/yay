@@ -549,26 +549,9 @@ Focus on: source authenticity, build process sanity, privilege usage, persistenc
     local result=""
     local ai_source=""
 
-    local claudeload_bin="$HOME/bin/claudeload"
-
-    if [ -z "${_AUR_AI_LOADED:-}" ]; then
-        if [ ! -f "$claudeload_bin" ]; then
-            claudeload_bin="$(command -v claudeload 2>/dev/null || true)"
-        fi
-
-        if [ -n "$claudeload_bin" ] && [ -f "$claudeload_bin" ]; then
-            echo -e "  ${DIM}[L4] Please choose an AI backend for this session...${RST}" >&2
-            set +eu
-            export CLAUDELOAD_QUIET=""
-            source "$claudeload_bin" menu </dev/tty >/dev/tty
-            set -euo pipefail
-            export _AUR_AI_LOADED=1
-            export _AUR_AI_LABEL="${ANTHROPIC_MODEL:-Claude}"
-        else
-            echo -e "  ${YEL}claudeload not found${RST}" >&2
-            return 1
-        fi
-    fi
+    # claudeload is loaded once per yay run by validate_package, in the parent
+    # shell — sourcing it here would die with this subshell and re-prompt.
+    [ "${_AUR_AI_LOADED:-}" = "1" ] || return 1
 
     echo -e "  ${DIM}[L4] asking ${_AUR_AI_LABEL}…${RST}" >&2
 
@@ -578,7 +561,7 @@ Focus on: source authenticity, build process sanity, privilege usage, persistenc
     echo -e "\033[34m╰── \033[90m(Prompt sent: $(echo "$prompt" | wc -c) bytes)\033[0m\n" >&2
 
     result=$( (
-        timeout 300 claude -p "$prompt" --output-format stream-json --include-partial-messages 2>/dev/null | python3 -c '
+        timeout 900 claude -p "$prompt" --output-format stream-json --include-partial-messages 2>/dev/null | python3 -c '
 import sys, json
 json_acc = ""
 for line in sys.stdin:
@@ -678,14 +661,17 @@ sys.stdout.write("\n")
     # "suspicious"/"verdict" colloquially and would trigger a false positive).
     local verdict_word
     verdict_word=$(echo "$result" \
-        | grep -iE '^\s*#+\s*[0-9]*\.?\s*VERDICT' -A3 \
+        | grep -iE '^[^A-Za-z]*VERDICT' -A3 \
         | grep -oiE '\b(SAFE|SUSPICIOUS|DANGEROUS)\b' \
         | head -1)
+    verdict_word="${verdict_word^^}"
 
     case "$verdict_word" in
-        DANGEROUS)   echo "DANGEROUS" ;;
-        SUSPICIOUS)  echo "SUSPICIOUS" ;;
-        *)           echo "SAFE" ;;
+        DANGEROUS)  echo "DANGEROUS" ;;
+        SUSPICIOUS) echo "SUSPICIOUS" ;;
+        SAFE)       echo "SAFE" ;;
+        # No parseable verdict (odd formatting, truncated stream) → fail closed.
+        *)          echo "SUSPICIOUS" ;;
     esac
 }
 
@@ -756,7 +742,25 @@ validate_package() {
         [[ "$answer" == "I ACCEPT THE RISK" ]] && return 0 || return 1
     fi
 
-    # AI analysis
+    # AI analysis — load the backend once per yay run, HERE (parent shell), so
+    # the choice survives every package/dependency scan.
+    if [ -z "${_AUR_AI_LOADED:-}" ]; then
+        local claudeload_bin="$HOME/bin/claudeload"
+        [ -f "$claudeload_bin" ] || claudeload_bin="$(command -v claudeload 2>/dev/null || true)"
+        if [ -n "$claudeload_bin" ] && [ -f "$claudeload_bin" ]; then
+            echo -e "  ${DIM}[L4] Please choose an AI backend for this session...${RST}"
+            set +eu
+            export CLAUDELOAD_QUIET=""
+            source "$claudeload_bin" menu </dev/tty >/dev/tty
+            set -euo pipefail
+            export _AUR_AI_LOADED=1
+            export _AUR_AI_LABEL="${ANTHROPIC_MODEL:-Claude}"
+        else
+            echo -e "  ${YEL}claudeload not found${RST}"
+            export _AUR_AI_LOADED=failed
+        fi
+    fi
+
     local ai_verdict=""
     ai_verdict=$(scan_layer4_ai "$tmpdir/$pkg" "$pkg") || ai_verdict="UNAVAILABLE"
     rm -rf "$tmpdir"

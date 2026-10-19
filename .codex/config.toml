@@ -1,5 +1,5 @@
-model = "gpt-5.5"
-model_reasoning_effort = "low"
+model = "gpt-5.6-terra"
+model_reasoning_effort = "medium"
 approvals_reviewer = "user"
 approval_policy = "never"
 developer_instructions = "Never add AI attribution, including Co-Authored-By lines, to git commit messages or pull requests."
@@ -21,5 +21,16 @@ trust_level = "trusted"
 [projects."/home/awcator/Documents"]
 trust_level = "trusted"
 
+[projects."/home/awcator/Documents/ri-project-occulus"]
+trust_level = "trusted"
+
+[projects."/home/awcator/Documents/ri-project-occulus/enterprise-imaging/ohif-build-workspace"]
+trust_level = "trusted"
+
+[tui]
+screen_reader_detection_done = true
+resume_cwd = "session"
+
 [tui.model_availability_nux]
 gpt-6-astra = 1
+"gpt-6.1-sol" = 4
