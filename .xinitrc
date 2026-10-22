@@ -15,11 +15,18 @@ fi
 
 systemctl --user import-environment DISPLAY XAUTHORITY
 dbus-update-activation-environment --systemd DISPLAY XAUTHORITY XDG_CURRENT_DESKTOP
-xrandr --setprovideroutputsource modesetting NVIDIA-G0
-xrandr --auto
+
+# PRIME output offload, only when NVIDIA-G0 advertises "Source Output".
+# Under sunshinemode's virtual config the provider is Sink-Output-only, and this
+# call then fails BadValue and leaves outputs half-configured ("Configure crtc N failed").
+if xrandr --listproviders 2>/dev/null | grep 'NVIDIA-G0' | grep -q 'Source Output'; then
+    xrandr --setprovideroutputsource modesetting NVIDIA-G0 && xrandr --auto
+fi
+
 sleep 2
-# Find and enable the real external monitor (CND MAG 342CQ) if connected
-EXT_MON=$(xrandr | grep " connected" | grep -v eDP | grep -v "1024x768" | head -1 | awk '{print $1}')
+# Find and enable the real external monitor (CND MAG 342CQ) if connected.
+# The mm filter skips virtual/Sunshine outputs, which report no physical size.
+EXT_MON=$(xrandr | grep " connected" | grep -v eDP | grep "[1-9][0-9][0-9]mm" | head -1 | awk '{print $1}')
 if [ -n "$EXT_MON" ]; then
     xrandr --output "$EXT_MON" --mode 3440x1440 --rate 100 --primary --right-of eDP-1 2>/dev/null || \
     xrandr --output "$EXT_MON" --auto --primary --right-of eDP-1 2>/dev/null

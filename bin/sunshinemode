@@ -8,12 +8,35 @@ DETECT_LOG="/tmp/sunshine-detect-$$.log"
 XCONF_DIR="/etc/X11/xorg.conf.d"
 REAL_CONF="$XCONF_DIR/10-nvidia-primary.conf"
 VIRTUAL_CONF="$XCONF_DIR/10-nvidia-virtual.conf"
-SUDO_PASS="REDACTED_SEE_ASKPASS"
+# S23 Ultra native res at a true 60Hz, via REDUCED BLANKING.
+# The obvious modeline for 2340x1080@60 needs ~211 MHz (standard CVT), which
+# blows past DFP-1's 165 MHz Internal-TMDS ceiling. Trimming the horizontal
+# blanking (htotal 2480 instead of 3144) drops the pixel clock to 164.42 MHz,
+# which fits - at a full 60Hz, matching the phone's 19.5:9 aspect exactly.
+PHONE_MODE="2340x1080_60"
+PHONE_MODELINE="164.42 2340 2388 2420 2480 1080 1083 1093 1105 +hsync -vsync"
 
-PHONE_MODE="2340x1080_60.00"
+SUDO_KEEPALIVE_PID=""
+
+# This script restarts Xorg, so no sudo prompt can be shown once X is down.
+# Authenticate once up front on the terminal, then keep the timestamp warm so
+# every later do_sudo succeeds without prompting.
+# env -u SUDO_ASKPASS: the shell exports it, and sudo would otherwise divert to
+# an X11 dialog that has nowhere to render.
+sudo_init() {
+    if ! env -u SUDO_ASKPASS sudo -v; then
+        echo "ERROR: sudo authentication failed. Aborting." >&2
+        exit 1
+    fi
+    ( while true; do sudo -n -v 2>/dev/null || exit; sleep 30; done ) &
+    SUDO_KEEPALIVE_PID=$!
+}
 
 do_sudo() {
-    echo "$SUDO_PASS" | sudo -S "$@" 2>/dev/null
+    if ! sudo -n "$@" 2>/dev/null; then
+        echo "WARNING: sudo failed for: $*" >&2
+        return 1
+    fi
 }
 
 swap_to_virtual() {
@@ -55,7 +78,9 @@ wait_for_x() {
 # --- Crash recovery ---
 if [ -f "$VIRTUAL_CONF" ] && [ ! -f "$REAL_CONF" ]; then
     echo "WARNING: Virtual config was left active (previous crash?). Recovering..."
+    sudo_init
     swap_to_real
+    [ -n "$SUDO_KEEPALIVE_PID" ] && kill "$SUDO_KEEPALIVE_PID" 2>/dev/null
     echo "Recovered. Real config restored."
     echo "Run sunshinemode again to start streaming."
     exit 0
@@ -75,11 +100,16 @@ cleanup() {
     do_sudo killall Xorg
     sleep 2
     startx -- :0 vt1 &
+
+    [ -n "$SUDO_KEEPALIVE_PID" ] && kill "$SUDO_KEEPALIVE_PID" 2>/dev/null
     echo "Done. Normal desktop restored."
     exit 0
 }
 
 trap cleanup EXIT INT TERM HUP
+
+# --- Authenticate once, while X is still available for the askpass dialog ---
+sudo_init
 
 # --- Switch to virtual config ---
 echo "Switching to virtual display config..."
@@ -125,17 +155,22 @@ for out in $(xrandr | grep " connected" | grep -v eDP | grep -v "[1-9][0-9][0-9]
     fi
 done
 
-# Add S23 Ultra mode (2340x1080 @ 60Hz, ~164MHz fits TMDS 165MHz)
-xrandr --newmode "$PHONE_MODE" 164.00 2340 2488 2736 3132 1080 1083 1093 1120 -hsync +vsync 2>/dev/null
-xrandr --addmode "$VIRTUAL_OUTPUT" "$PHONE_MODE" 2>/dev/null
+# Add the S23 Ultra native mode. Both calls are idempotent-guarded: the mode
+# persists for the life of the X server, so re-running would fail BadName/BadMatch.
+if ! xrandr | grep -q "$PHONE_MODE"; then
+    xrandr --newmode "$PHONE_MODE" $PHONE_MODELINE || echo "WARNING: newmode $PHONE_MODE failed" >&2
+    xrandr --addmode "$VIRTUAL_OUTPUT" "$PHONE_MODE" || echo "WARNING: addmode $PHONE_MODE failed" >&2
+fi
 
-# Try modes: 1920x1080 best for S23 Ultra (scales perfectly), then phone mode, then auto
-if xrandr --output "$VIRTUAL_OUTPUT" --mode 1920x1080 --left-of eDP-1 2>/dev/null; then
-    echo "Set virtual display to 1920x1080 (fits S23 Ultra)"
-elif xrandr --output "$VIRTUAL_OUTPUT" --mode "$PHONE_MODE" --left-of eDP-1 2>/dev/null; then
-    echo "Set virtual display to S23 Ultra native ($PHONE_MODE)"
+# Prefer the phone's native 19.5:9 mode (fills the S23 Ultra edge to edge).
+# Fall back to 1920x1080 (16:9, pillarboxed on the phone), then --auto.
+if xrandr --output "$VIRTUAL_OUTPUT" --mode "$PHONE_MODE" --left-of eDP-1; then
+    echo "Set virtual display to S23 Ultra native ($PHONE_MODE, 19.5:9 @ 60Hz)"
+elif xrandr --output "$VIRTUAL_OUTPUT" --mode 1920x1080 --left-of eDP-1; then
+    echo "Set virtual display to 1920x1080 (16:9 fallback - side bars on phone)"
 else
-    xrandr --output "$VIRTUAL_OUTPUT" --auto --left-of eDP-1 2>/dev/null
+    xrandr --output "$VIRTUAL_OUTPUT" --auto --left-of eDP-1 \
+        || echo "ERROR: could not configure $VIRTUAL_OUTPUT" >&2
     echo "Set virtual display to auto mode"
 fi
 
