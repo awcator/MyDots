@@ -8,13 +8,14 @@ DETECT_LOG="/tmp/sunshine-detect-$$.log"
 XCONF_DIR="/etc/X11/xorg.conf.d"
 REAL_CONF="$XCONF_DIR/10-nvidia-primary.conf"
 VIRTUAL_CONF="$XCONF_DIR/10-nvidia-virtual.conf"
-# S23 Ultra native res at a true 60Hz, via REDUCED BLANKING.
-# The obvious modeline for 2340x1080@60 needs ~211 MHz (standard CVT), which
-# blows past DFP-1's 165 MHz Internal-TMDS ceiling. Trimming the horizontal
-# blanking (htotal 2480 instead of 3144) drops the pixel clock to 164.42 MHz,
-# which fits - at a full 60Hz, matching the phone's 19.5:9 aspect exactly.
-PHONE_MODE="2340x1080_60"
-PHONE_MODELINE="164.42 2340 2388 2420 2480 1080 1083 1093 1105 +hsync -vsync"
+# S23 Ultra mode at a true 60Hz, via REDUCED BLANKING.
+# Width is 2336, not the phone's exact 2340: NVENC needs a 16-pixel-aligned
+# width, and 2340/16 = 146.25 segfaults the encoder when a client connects.
+# 2336/16 = 146 exactly, and the 0.2% aspect difference is invisible.
+# Standard CVT for this res needs ~211MHz, over DFP-1's 165MHz TMDS ceiling;
+# trimming htotal to 2480 brings it to 164.42MHz, which fits at 60Hz.
+PHONE_MODE="2336x1080_60"
+PHONE_MODELINE="164.42 2336 2384 2416 2480 1080 1083 1093 1105 +hsync -vsync"
 
 SUDO_KEEPALIVE_PID=""
 

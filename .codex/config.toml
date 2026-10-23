@@ -1,5 +1,5 @@
-model = "gpt-5.6-terra"
-model_reasoning_effort = "medium"
+model = "gpt-6-sol"
+model_reasoning_effort = "high"
 approvals_reviewer = "user"
 approval_policy = "never"
 developer_instructions = "Never add AI attribution, including Co-Authored-By lines, to git commit messages or pull requests."

@@ -1,3 +1,5 @@
+#shift tab expand and filll
+"\e[Z": menu-complete
 set editing-mode vim
 set completion-ignore-case on
 set history-size 10000

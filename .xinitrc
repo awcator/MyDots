@@ -6,11 +6,14 @@ export GTK_USE_PORTAL=1
 #export DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$(id -u)/bus
 #export GSK_RENDERER=cairo  # disabled - NVIDIA primary handles GTK4 GPU rendering
 
-# Crash recovery: if sunshinemode crashed, restore real xorg config
+# Crash recovery: if sunshinemode left the virtual config active, warn only.
+# Do NOT sudo here - .xinitrc runs inside the X session with no controlling
+# terminal, so a password prompt has nowhere to go and fails with
+# "x11 failed to open". sunshinemode does the actual recovery at startup,
+# from the tty where it can prompt.
 XCONF_DIR="/etc/X11/xorg.conf.d"
 if [ -f "$XCONF_DIR/10-nvidia-virtual.conf" ] && [ ! -f "$XCONF_DIR/10-nvidia-primary.conf" ]; then
-    sudo mv "$XCONF_DIR/10-nvidia-virtual.conf" "$XCONF_DIR/10-nvidia-virtual.conf.disabled" 2>/dev/null
-    sudo mv "$XCONF_DIR/10-nvidia-primary.conf.disabled" "$XCONF_DIR/10-nvidia-primary.conf" 2>/dev/null
+    echo ".xinitrc: virtual xorg config still active - run sunshinemode to restore" >&2
 fi
 
 systemctl --user import-environment DISPLAY XAUTHORITY
