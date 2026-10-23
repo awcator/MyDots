@@ -159,3 +159,4 @@ case ":$PATH:" in
 esac
 
 source ~/.env
+bind -f ~/.inputrc
