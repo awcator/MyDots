@@ -75,7 +75,6 @@ if curl -sf http://localhost:4141/v1/models >/dev/null 2>&1; then
   echo "▶ COPILOT (:4141)"
   mapfile -t MODELS < <(curl -sf http://localhost:4141/v1/models 2>/dev/null \
     | grep -o '"id":"[^"]*"' | cut -d'"' -f4 \
-    | grep -viE 'embedding|whisper|tts|dall-e|babbage|davinci|moderation|text-search|search|similarity|trajectory|compaction|image' \
     | sort -u -V)
   echo "  ${#MODELS[@]} models"
   for m in "${MODELS[@]}"; do test_combo copilot "$m"; done
@@ -109,23 +108,6 @@ else
   echo "⏭ ANTIGRAVITY: port 9080 down"
 fi
 
-# ── AI Studio (:9083) ──
-if curl -sf http://localhost:9083/health >/dev/null 2>&1 || curl -sf http://localhost:9083/v1/models >/dev/null 2>&1; then
-  echo "▶ AI STUDIO (:9083)"
-  mapfile -t MODELS < <(curl -sf "https://generativelanguage.googleapis.com/v1beta/models?key=$GEMINI_API_KEY" 2>/dev/null \
-    | python3 -c 'import json,sys
-for m in json.load(sys.stdin).get("models",[]):
-    mid=m["name"].replace("models/","")
-    if "generateContent" in m.get("supportedGenerationMethods",[]):
-        print(mid)
-' 2>/dev/null | sort -V)
-  echo "  ${#MODELS[@]} generation models"
-  for m in "${MODELS[@]}"; do test_combo aistudio "$m"; done
-  echo ""
-else
-  echo "⏭ AI STUDIO: port 9083 down"
-fi
-
 # ── Devin proxy ──
 DEVIN_TEST_URL="${DEVIN_PROXY_BASE_URL:-http://127.0.0.1:${DEVIN_PROXY_PORT:-3003}}"
 DEVIN_TEST_KEY="${DEVIN_PROXY_API_KEY:-${API_KEY:-dummy}}"
@@ -144,7 +126,7 @@ else
 fi
 
 # ── Codex Proxy (:8081) ──
-CODEX_PROXY_BASE_URL="${CODEX_PROXY_BASE_URL:-http://127.0.0.1:8081}"
+CODEX_PROXY_BASE_URL="${CODEX_PROXY_BASE_URL:-http://127.0.0.1:${CODEX_PROXY_PORT:-8081}}"
 CODEX_PROXY_KEY="${CODEX_PROXY_API_KEY:-}"
 CODEX_PROXY_CONFIG="${CODEX_PROXY_CONFIG:-$(dirname "$MYDOTS_ROOT")/codex-proxy/data/local.yaml}"
 if [[ -z "$CODEX_PROXY_KEY" && -r "$CODEX_PROXY_CONFIG" ]]; then
@@ -163,7 +145,7 @@ for model in json.load(sys.stdin).get("data", []):
   for m in "${MODELS[@]}"; do test_combo codexproxy "$m"; done
   echo ""
 else
-  echo "⏭ CODEX PROXY: unavailable on :8081 or API key not configured"
+  echo "⏭ CODEX PROXY: unavailable at $CODEX_PROXY_BASE_URL or API key not configured"
 fi
 
 echo ""

@@ -27,21 +27,35 @@ _cl_backend_run() {
     _cl_spawn_proxy omniroute "$port" omniroute serve --port "$port" --log --no-open || return 1
   fi
 
-  local models_json active_providers
+  local models_json active_providers=""
   models_json="$(_cl_fetch_catalog "$base_url/models" "$ANTHROPIC_API_KEY" 15)" || {
     _cl_die "omniroute: couldn't fetch models from $base_url"
     return 1
   }
-  # A local OmniRoute install can identify which catalog providers are active.
-  if [[ -z "${OMNIROUTE_BASE_URL:-}" ]] && command -v omniroute >/dev/null 2>&1 && command -v jq >/dev/null 2>&1; then
-    active_providers="$(omniroute providers list | awk '/active/{print $2}' | paste -sd "," -)"
-    if [[ -n "$active_providers" ]]; then
-      models_json="$(printf '%s' "$models_json" | jq --arg providers "$active_providers" '.data = [.data[] | select(.owned_by as $o | ($providers | contains($o)) and (.id | test("-low$|-medium$|-high$|-xhigh$|-tiered$|^auto/|/auto$|^kiro/|^gemini-web/") | not))]')"
-    fi
+  # Keep the full catalog. A local install can flag providers that are not
+  # currently active without removing their models from the chooser.
+  if [[ -z "${OMNIROUTE_BASE_URL:-}" ]] && command -v omniroute >/dev/null 2>&1; then
+    active_providers="$(omniroute providers list 2>/dev/null | awk '/active/{print $2}' | paste -sd ',' -)"
   fi
 
   local tsv
-  tsv="$(_cl_basic_models_tsv "$models_json" name "")"
+  tsv="$(_CL_ACTIVE_PROVIDERS="$active_providers" _cl_models_to_tsv "$models_json" "${_CL_PY_SORT}"'
+import json, os
+payload = json.loads(os.environ["_CL_JSON"])
+models = payload.get("data", []) if isinstance(payload, dict) else payload
+active = set(filter(None, os.environ.get("_CL_ACTIVE_PROVIDERS", "").split(",")))
+rows = {}
+for model in models:
+    mid = model.get("id")
+    if not mid:
+        continue
+    owner = model.get("owned_by") or ""
+    label = model.get("name") or owner
+    status = "provider not active" if active and owner not in active else ""
+    rows[mid] = (mid, label, status)
+for mid, label, status in sorted(rows.values(), key=_nkey):
+    print("%s\t%s\t%s" % (mid, label, status))
+')"
 
   local base
   base="$(_cl_select_model "OmniRoute models ($base_url)" "$tsv" "$model_override")" \

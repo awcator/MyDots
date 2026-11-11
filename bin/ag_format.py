@@ -18,6 +18,7 @@ def nkey(s):
 
 models_data = json.loads(sys.argv[1]) if len(sys.argv) > 1 else {}
 accounts_data = json.loads(sys.argv[2]) if len(sys.argv) > 2 else {}
+warn_models = set(sys.argv[3].split()) if len(sys.argv) > 3 else set()
 
 accounts = [a for a in accounts_data.get("accounts", []) if a.get("enabled", True)]
 now = time.time()
@@ -88,4 +89,6 @@ for mid in sorted_models:
             pairs.append(f"{C_OK}{acc['short']}:✓{RESET}")
             
     status_str = f"{hbar}  {frac}   {'  '.join(pairs)}"
+    if mid in warn_models:
+        status_str += f"  {C_WARN}previously failed{RESET}"
     print(f"{mid}\t\t{status_str}")

@@ -25,7 +25,7 @@ _cl_backend_run() {
 
   local models_json tsv all base
   models_json="$(_cl_fetch_json "$base_url/v1/models" "${COPILOT_AUTH_TOKEN:-}")"
-  tsv="$(_cl_basic_models_tsv "$models_json" "" "" | _cl_filter_chat_models)"
+  tsv="$(_cl_basic_models_tsv "$models_json" "" "")"
   if [[ -z "$tsv" ]]; then
     _cl_die "copilot: couldn't fetch models from $base_url"
     return 1

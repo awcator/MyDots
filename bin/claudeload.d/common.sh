@@ -119,28 +119,12 @@ _cl_spawn_proxy() {
 #  Data Helpers
 # ══════════════════════════════════════════════════════════════════════════════
 
-_cl_require_litellm() {
-  local name="$1"
-  command -v litellm >/dev/null 2>&1 || export PATH="$PATH:$HOME/.local/bin"
-  if ! command -v litellm >/dev/null 2>&1; then
-    _cl_die "$name: litellm not found! Install via: uv tool install 'litellm[proxy]'"
-    return 1
-  fi
-}
-
 _cl_require_node() {
   local name="$1"
   if ! command -v node >/dev/null 2>&1; then
     _cl_die "$name: node not found (install Node.js)"
     return 1
   fi
-}
-
-# Keep generated LiteLLM config files in the user's cache directory.
-_cl_config_file() {
-  local dir="${XDG_CACHE_HOME:-$HOME/.cache}/claudeload"
-  mkdir -p "$dir" || return 1
-  printf '%s/%s' "$dir" "$1"
 }
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -169,11 +153,6 @@ _cl_fetch_catalog() {
     ((i + 1 < attempts)) && sleep 1
   done
   return 1
-}
-
-# Keep non-conversational endpoints out of Claude Code's model picker.
-_cl_filter_chat_models() {
-  \grep -viE 'embedding|whisper|tts|dall-e|babbage|davinci|moderation|text-search|search|similarity|trajectory|compaction|image'
 }
 
 _cl_sort_models() {

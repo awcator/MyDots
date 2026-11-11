@@ -8,15 +8,32 @@
 _cl_backend_run() {
   local model_override="${1:-}"
   local port
-  port="$(_cl_resolve_port "" 8081)" || return 1
+  port="$(_cl_resolve_port "${CODEX_PROXY_PORT:-}" 8081)" || return 1
   local base_url="${CODEX_PROXY_BASE_URL:-http://127.0.0.1:$port}"
   base_url="${base_url%/}"
-  local key="${CODEX_PROXY_API_KEY:-}"
   local compose_dir="${CODEX_PROXY_DIR:-$_CLD_SIBLINGS/codex-proxy}"
   local key_file="${CODEX_PROXY_CONFIG:-$compose_dir/data/local.yaml}"
 
-  # Prefer an explicitly supplied key.  The Docker setup stores its generated
-  # local key in data/local.yaml; read it only when no override was supplied.
+  # Start the bundled Compose setup before reading its key: on a fresh clone,
+  # the proxy creates data/local.yaml during its first startup.
+  if [[ "$base_url" == "http://127.0.0.1:$port" || "$base_url" == "http://localhost:$port" ]] && ! _cl_port_up "$port"; then
+    if ! command -v docker >/dev/null 2>&1 || [[ ! -f "$compose_dir/docker-compose.yml" ]]; then
+      _cl_die "codexproxy: Docker Compose setup not found at $compose_dir"
+      return 1
+    fi
+    # This Compose file declares .env as a service env_file, so it must exist.
+    [[ -e "$compose_dir/.env" ]] || : > "$compose_dir/.env" || return 1
+    _cl_spawn_proxy codexproxy "$port" \
+      bash -c 'cd "$1" && exec env PORT="$2" docker compose up' _ "$compose_dir" "$port" || return 1
+    if ! _cl_port_up "$port"; then
+      _cl_die "codexproxy: :$port did not become ready after 30 seconds"
+      return 1
+    fi
+  fi
+
+  # Prefer an explicit key. The local proxy writes its generated key on first
+  # startup; external URLs can supply their own key with CODEX_PROXY_API_KEY.
+  local key="${CODEX_PROXY_API_KEY:-}"
   if [[ -z "$key" && -r "$key_file" ]]; then
     key="$(sed -n 's/^[[:space:]]*proxy_api_key:[[:space:]]*//p' "$key_file" | head -n 1)"
     key="${key%%[[:space:]]#*}"
@@ -26,20 +43,6 @@ _cl_backend_run() {
   if [[ -z "$key" || "$key" == "null" ]]; then
     _cl_die "codexproxy: API key unavailable — set CODEX_PROXY_API_KEY or log in to the local dashboard"
     return 1
-  fi
-
-  # Start only the known local default. Custom URLs point to existing services.
-  if [[ "$base_url" == "http://127.0.0.1:$port" || "$base_url" == "http://localhost:$port" ]] && ! _cl_port_up "$port"; then
-    if ! command -v docker >/dev/null 2>&1 || [[ ! -f "$compose_dir/docker-compose.yml" ]]; then
-      _cl_die "codexproxy: Docker Compose setup not found at $compose_dir"
-      return 1
-    fi
-    _cl_spawn_proxy codexproxy "$port" \
-      bash -c 'cd "$1" && exec docker compose up' _ "$compose_dir" || return 1
-    if ! _cl_port_up "$port"; then
-      _cl_die "codexproxy: :$port did not become ready after 30 seconds"
-      return 1
-    fi
   fi
 
   _cl_use_endpoint "$base_url" key "$key" || return 1
@@ -66,7 +69,16 @@ for m in models:
         continue
     desc = m.get("displayName") or m.get("description") or "Codex model"
     upgrade = m.get("upgrade") or {}
-    status = ("upgrade → %s" % upgrade.get("model")) if upgrade.get("model") else ""
+    flags = []
+    if m.get("visibility") == "hide":
+        flags.append("hidden upstream")
+    if m.get("supportedInApi") is False:
+        flags.append("API unsupported")
+    if m.get("outputModalities") and "text" not in m["outputModalities"]:
+        flags.append("non-text")
+    if upgrade.get("model"):
+        flags.append("upgrade → %s" % upgrade["model"])
+    status = " · ".join(flags)
     rows.append((mid, desc, status))
 rows.sort(key=_nkey)
 for mid, desc, status in rows:

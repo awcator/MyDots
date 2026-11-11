@@ -2,8 +2,8 @@
 # claudeload — switch Claude Code backend in current shell
 # Usage: source /path/to/MyDots/bin/claudeload <profile> [model]
 #
-# Backends: omniroute | strata | codexproxy | openai | copilot | junie |
-#           devin | deepseek | antigravity | aistudio
+# Backends: omniroute | strata | codexproxy | copilot | junie | devin |
+#           deepseek | antigravity
 # Proxies run foreground in tmux session 'proxies' (spawned only if port is down).
 # Local proxy checkouts default to siblings of this repo; override their paths
 # with the backend-specific *_DIR or *_REPO environment variable.
@@ -26,7 +26,7 @@ source "$_CLD_ROOT/bin/claudeload.d/common.sh"
 _cl_dispatch() {
   local profile="${1:-}" model="${2:-}"
   if [[ -z "$profile" || "$profile" == menu || "$profile" == m ]]; then
-    profile="$(_cl_pick "Choose Claude Code backend" $'omniroute\tOmniRoute Server\nstrata\tStrata local Qwen Coder\ncodexproxy\tCodex Proxy (Docker)\nopenai\tOpenAI via LiteLLM\ncopilot\tGitHub Copilot proxy\njunie\tJetBrains Junie proxy\ndevin\tDevin proxy\ndeepseek\tDeepSeek direct API\nantigravity\tAntigravity account proxy\naistudio\tGoogle AI Studio via LiteLLM')" || {
+    profile="$(_cl_pick "Choose Claude Code backend" $'omniroute\tOmniRoute Server\nstrata\tStrata local Qwen Coder\ncodexproxy\tCodex Proxy (Docker)\ncopilot\tGitHub Copilot proxy\njunie\tJetBrains Junie proxy\ndevin\tDevin proxy\ndeepseek\tDeepSeek direct API\nantigravity\tAntigravity account proxy')" || {
       _cl_warn "  cancelled"
       return 1
     }
@@ -38,8 +38,6 @@ _cl_dispatch() {
     devin|dv)                        profile=devin ;;
     deepseek)                        profile=deepseek ;;
     antigravity|ag)                  profile=antigravity ;;
-    aistudio|ai)                     profile=aistudio ;;
-    openai|chatgpt|oai)              profile=openai ;;
     codexproxy|codex-proxy|codex|cp) profile=codexproxy ;;
     omniroute|or)                    profile=omniroute ;;
     strata|st)                       profile=strata ;;
@@ -54,8 +52,6 @@ claudeload — switch Claude Code backend
   devin       interactive: pick a live model from Devin proxy
   deepseek    DeepSeek models (api.deepseek.com)
   antigravity Antigravity account proxy
-  aistudio    Google AI Studio via LiteLLM
-  openai      OpenAI via LiteLLM
   codexproxy  Codex Proxy via Docker
   omniroute   OmniRoute server
   strata      Strata local Qwen Coder
@@ -69,8 +65,7 @@ Existing services can be selected with COPILOT_BASE_URL, DEVIN_PROXY_BASE_URL,
 AG_BASE_URL, CODEX_PROXY_BASE_URL, OMNIROUTE_BASE_URL, or STRATA_BASE_URL.
 Use the service origin for these URLs; OMNIROUTE_BASE_URL includes /v1.
 Set DEVIN_PROXY_API_KEY for a protected Devin proxy. Local port overrides:
-JUNIE_PORT, DEVIN_PROXY_PORT, AG_PORT, AISTUDIO_PORT, OPENAI_PROXY_PORT,
-STRATA_PORT.
+JUNIE_PORT, DEVIN_PROXY_PORT, AG_PORT, CODEX_PROXY_PORT, STRATA_PORT.
 COPILOT_AUTH_TOKEN, JUNIE_AUTH_TOKEN, AG_AUTH_TOKEN, and STRATA_AUTH_TOKEN
 configure authentication for those proxies when needed.
 COPILOT_ACCOUNT_TYPE, STRATA_CONTEXT_TOKENS, and CLAUDELOAD_MAX_OUTPUT_TOKENS

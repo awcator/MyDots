@@ -9,7 +9,7 @@
 # build ordered the dead cloudcode-pa prod endpoint first and lacks the
 # signature-scrubbing and Claude max-token fixes, so `acc start` fails with a
 # misleading 429 "quota exhausted" on every account.
-# Models the quota API advertises but that do not actually serve. Verified
+# Models that previously failed generation. Verified
 # 2026-09-17 by querying the Cloud Code API directly with a minted token:
 #   gemini-2.5-pro      503 "No capacity available for model" — retired upstream
 #   gemini-3.1-pro-high 400 INVALID_ARGUMENT under every request shape tried
@@ -18,15 +18,14 @@
 #                       gemini-3.1-pro-low answers fine, so it is the id that is
 #                       dead, not the request. Picking it costs a ~2 min retry
 #                       ladder before it gives up.
-# Both are still listed by every proxy endpoint, so filter them here. Override to
-# re-test, and prune entries that start working again:
-#   AG_DEAD_MODELS="gemini-2.5-pro" source claudeload antigravity
+# Keep them visible and flag the past failure in the chooser. Override the
+# warning list after re-testing with AG_WARN_MODELS.
 _cl_backend_run() {
   local model_override="${1:-}"
   local repo_dir="${AG_REPO:-$_CLD_SIBLINGS/antigravity-claude-proxy}"
   local port
   port="$(_cl_resolve_port "${AG_PORT:-}" 9080)" || return 1
-  local dead_models="${AG_DEAD_MODELS:-gemini-2.5-pro gemini-3.1-pro-high}"
+  local warn_models="${AG_WARN_MODELS:-${AG_DEAD_MODELS:-gemini-2.5-pro gemini-3.1-pro-high}}"
   local base_url="${AG_BASE_URL:-http://localhost:$port}"
   base_url="${base_url%/}"
 
@@ -66,14 +65,12 @@ _cl_backend_run() {
   # reports the full per-account quota set, so use that as the source of truth
   # and fold in the listing for anything it doesn't cover.
   local catalog_json
-  catalog_json="$(_AG_HEALTH="$health_json" _AG_MODELS="$models_json" \
-                  _AG_DEAD="$dead_models" python3 -c '
+  catalog_json="$(_AG_HEALTH="$health_json" _AG_MODELS="$models_json" python3 -c '
 import json, os
 seen, ids, descs = set(), [], []
-dead = set((os.environ.get("_AG_DEAD") or "").split())
 
 def add(mid, desc=""):
-    if mid and mid not in seen and mid not in dead:
+    if mid and mid not in seen:
         seen.add(mid)
         ids.append(mid)
         descs.append(desc)
@@ -100,7 +97,7 @@ print(json.dumps({"object": "list",
   fi
 
   local tsv
-  tsv="$(python3 "$_CLD_ROOT/bin/ag_format.py" "$catalog_json" "$accounts_json")"
+  tsv="$(python3 "$_CLD_ROOT/bin/ag_format.py" "$catalog_json" "$accounts_json" "$warn_models")"
 
   local base
   base="$(_cl_select_model "Antigravity models ($base_url)" "$tsv" "$model_override")" \
