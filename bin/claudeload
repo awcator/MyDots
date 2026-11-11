@@ -1,17 +1,21 @@
 #!/bin/bash
 # claudeload — switch Claude Code backend in current shell
-# Usage: source claudeload <profile> [model]
+# Usage: source /path/to/MyDots/bin/claudeload <profile> [model]
 #
-# Backends: copilot | junie | windsurf | deepseek | antigravity | aistudio | codexproxy
+# Backends: copilot | junie | devin | deepseek | antigravity | aistudio | codexproxy
 # Proxies run foreground in tmux session 'proxies' (spawned only if port is down).
+# Local proxy checkouts default to siblings of this repo; override their paths
+# with the backend-specific *_DIR or *_REPO environment variable.
 
 # ══════════════════════════════════════════════════════════════════════════════
 #  Constants
 # ══════════════════════════════════════════════════════════════════════════════
 
-export CLAUDE_CODE_MAX_OUTPUT_TOKENS=128000
+export CLAUDE_CODE_MAX_OUTPUT_TOKENS="${CLAUDELOAD_MAX_OUTPUT_TOKENS:-128000}"
 
-_CLD_SELF="$(readlink -f "${BASH_SOURCE[0]}")"
+_CLD_SELF="$(python3 -c 'import os, sys; print(os.path.realpath(sys.argv[1]))' "${BASH_SOURCE[0]}")"
+_CLD_ROOT="$(dirname "$(dirname "$_CLD_SELF")")"
+_CLD_SIBLINGS="$(dirname "$_CLD_ROOT")"
 
 # ANSI helpers (prefixed _CL_ to avoid clashing with .bashrc PS1 vars)
 _CL_B=$'\033[1m'  _CL_C=$'\033[36m'  _CL_G=$'\033[32m'
@@ -21,9 +25,9 @@ _CL_Y=$'\033[33m' _CL_R=$'\033[31m'  _CL_D=$'\033[2m'  _CL_0=$'\033[0m'
 #  Logging & Error Handling
 # ══════════════════════════════════════════════════════════════════════════════
 
-_cl_log()  { [[ -z "${CLAUDELOAD_QUIET:-}" ]] && echo "$@"; }
-_cl_warn() { [[ -z "${CLAUDELOAD_QUIET:-}" ]] && echo "$@" >&2; }
-_cl_die()  { echo "$*" >&2; return 1 2>/dev/null || exit 1; }
+_cl_log()  { [[ -z "${CLAUDELOAD_QUIET:-}" ]] && echo "$@"; return 0; }
+_cl_warn() { [[ -z "${CLAUDELOAD_QUIET:-}" ]] && echo "$@" >&2; return 0; }
+_cl_die()  { echo "$*" >&2; return 1; }
 
 # ══════════════════════════════════════════════════════════════════════════════
 #  Environment Management
@@ -96,6 +100,7 @@ _cl_spawn_proxy() {
     sleep 1
   done
   _cl_warn "$name: warning — :$port not up after 30 s"
+  return 1
 }
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -111,14 +116,10 @@ _cl_require_litellm() {
   fi
 }
 
-_cl_require_node_npx() {
+_cl_require_node() {
   local name="$1"
   if ! command -v node >/dev/null 2>&1; then
     _cl_die "$name: node not found (install Node.js)"
-    return 1
-  fi
-  if ! command -v npx >/dev/null 2>&1; then
-    _cl_die "$name: npx not found (install npm)"
     return 1
   fi
 }
@@ -127,6 +128,13 @@ _cl_read_junie_api_key() {
   local v="${JUNIE_API_KEY:-}"
   [[ -n "$v" ]] || return 1
   printf '%s' "$v"
+}
+
+# Keep generated LiteLLM config files in the user's cache directory.
+_cl_config_file() {
+  local dir="${XDG_CACHE_HOME:-$HOME/.cache}/claudeload"
+  mkdir -p "$dir" || return 1
+  printf '%s/%s' "$dir" "$1"
 }
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -144,6 +152,10 @@ _cl_fetch_json() {
 # Keep non-conversational endpoints out of Claude Code's model picker.
 _cl_filter_chat_models() {
   \grep -viE 'embedding|whisper|tts|dall-e|babbage|davinci|moderation|text-search|search|similarity|trajectory|compaction|image'
+}
+
+_cl_sort_models() {
+  if sort -V </dev/null >/dev/null 2>&1; then sort -V; else sort; fi
 }
 
 # Run inline Python that reads JSON from $_CL_JSON env var and prints TSV.
@@ -165,9 +177,9 @@ _cl_models_to_tsv() {
 _cl_derive_fast() {
   local models="$1" pattern="$2" exclude="${3:-}"
   if [[ -n "$exclude" ]]; then
-    printf '%s\n' $models | \grep -iE "$pattern" | \grep -viE "$exclude" | sort -V | tail -1
+    printf '%s\n' "$models" | \grep -iE "$pattern" | \grep -viE "$exclude" | _cl_sort_models | tail -1
   else
-    printf '%s\n' $models | \grep -iE "$pattern" | sort -V | tail -1
+    printf '%s\n' "$models" | \grep -iE "$pattern" | _cl_sort_models | tail -1
   fi
 }
 
@@ -192,7 +204,7 @@ _cl_vendor_of() {
 _cl_pick() {
   local title="$1" tsv="$2"
   local out
-  out="$(printf '%s' "$tsv" | python3 "$HOME/Documents/MyDots/bin/cl_picker.py" "$title")"
+  out="$(printf '%s' "$tsv" | python3 "$_CLD_ROOT/bin/cl_picker.py" "$title")"
   local rc=$?
   if [[ $rc -eq 0 && -n "$out" ]]; then
     printf '%s' "$out"
@@ -249,77 +261,93 @@ def _nkey(r):
 
 _cl_backend_copilot() {
   local model_override="${1:-}"
+  local base_url="${COPILOT_BASE_URL:-http://localhost:4141}"
+  base_url="${base_url%/}"
 
   _cl_clear_env
-  export ANTHROPIC_BASE_URL=http://localhost:4141
-  export ANTHROPIC_AUTH_TOKEN=dummy
+  export ANTHROPIC_BASE_URL="$base_url"
+  export ANTHROPIC_AUTH_TOKEN="${COPILOT_AUTH_TOKEN:-dummy}"
 
-  _cl_spawn_proxy copilot 4141 \
-    npx -y copilot-api@latest start --account-type business
+  if [[ -z "${COPILOT_BASE_URL:-}" ]]; then
+    if ! _cl_port_up 4141 && ! command -v npx >/dev/null 2>&1; then
+      _cl_die "copilot: npx not found (install Node.js and npm)"
+      return 1
+    fi
+    _cl_spawn_proxy copilot 4141 \
+      npx -y copilot-api@latest start --account-type "${COPILOT_ACCOUNT_TYPE:-business}" || return 1
+  fi
 
-  # Fetch live model list from the proxy (no hardcoded fallback)
-  local all
-  all="$(\grep -o '"id":"[^"]*"' <<< "$(_cl_fetch_json http://localhost:4141/v1/models)" \
-        | cut -d'"' -f4 | _cl_filter_chat_models | sort -u -V)"
-  if [[ -z "$all" ]]; then
-    _cl_die "copilot: couldn't fetch models from :4141 (is copilot-api running?)"
+  local models_json tsv all base
+  models_json="$(_cl_fetch_json "$base_url/v1/models" "${COPILOT_AUTH_TOKEN:-}")"
+  tsv="$(_cl_models_to_tsv "$models_json" "${_CL_PY_SORT}"'
+import json, os
+models = json.loads(os.environ["_CL_JSON"]).get("data", [])
+ids = {m["id"] for m in models if isinstance(m, dict) and m.get("id")}
+for mid in sorted(ids, key=lambda mid: _nkey((mid,))):
+    print("%s\t\t" % mid)
+' 2>/dev/null | _cl_filter_chat_models)"
+  if [[ -z "$tsv" ]]; then
+    _cl_die "copilot: couldn't fetch models from $base_url"
     return 1
   fi
 
-  local base="$model_override"
-  if [[ -z "$base" ]]; then
-    echo "Pick a base model (Copilot, :4141):"
-    PS3="  model> "
-    select base in $all; do [[ -n "$base" ]] && break; done
-  fi
+  all="$(printf '%s\n' "$tsv" | cut -f1)"
+  base="$(_cl_select_model "Copilot models ($base_url)" "$tsv" "$model_override")" \
+    || return 1
 
   # Dynamically derive sonnet (mid-tier) and fast (lightest) from same vendor
   local vendor sonnet fast
   vendor="$(_cl_vendor_of "$base")"
   # Mid-tier: same vendor, prefer "sonnet" variant, else largest capable non-base
   sonnet="$(_cl_derive_fast "$all" "^${vendor}.*sonnet")"
-  [[ -z "$sonnet" ]] && sonnet="$(printf '%s\n' $all \
+  [[ -z "$sonnet" ]] && sonnet="$(printf '%s\n' "$all" \
     | \grep -iE "^${vendor}" \
     | \grep -viE 'mini|lite|haiku|flash|embed|compaction|trajectory|codex|copilot' \
-    | \grep -v "$base" | sort -V | tail -1)"
+    | \grep -Fxv "$base" | _cl_sort_models | tail -1)"
   # Fast: same vendor, prefer mini/haiku/flash/lite variant
   fast="$(_cl_derive_fast "$all" "^${vendor}.*(mini|haiku|flash|lite)")"
-  [[ -z "$fast" ]] && fast="$(printf '%s\n' $all \
-    | \grep -iE "^${vendor}" | sort -V | head -1)"
+  [[ -z "$fast" ]] && fast="$(printf '%s\n' "$all" \
+    | \grep -iE "^${vendor}" | _cl_sort_models | head -1)"
   : "${sonnet:=$base}" "${fast:=$base}"
 
   _cl_export_models "$base" "$fast" "$sonnet"
-  _cl_log "Loaded: $ANTHROPIC_MODEL (copilot, :4141)" \
+  _cl_log "Loaded: $ANTHROPIC_MODEL (copilot, $base_url)" \
           "— sonnet: $ANTHROPIC_DEFAULT_SONNET_MODEL," \
           "haiku: $ANTHROPIC_SMALL_FAST_MODEL"
 }
 
 # ══════════════════════════════════════════════════════════════════════════════
-#  Backend: Junie API  (default port 4143, junie-api via npx)
+#  Backend: Junie API  (default port 4143)
 # ══════════════════════════════════════════════════════════════════════════════
 
 _cl_backend_junie() {
   local model_override="${1:-}"
   local port="${JUNIE_PORT:-4143}"
+  local repo_dir="${JUNIE_REPO:-$_CLD_SIBLINGS/junie-api}"
 
   _cl_clear_env
-  _cl_require_node_npx "junie" || return 1
-
-  local key
-  key="$(_cl_read_junie_api_key)" || {
-    _cl_die "junie: JUNIE_API_KEY not found in environment"
-    return 1
-  }
 
   export ANTHROPIC_BASE_URL="http://localhost:$port"
-  export ANTHROPIC_AUTH_TOKEN=dummy
+  export ANTHROPIC_AUTH_TOKEN="${JUNIE_AUTH_TOKEN:-dummy}"
 
-  _cl_spawn_proxy junie "$port" \
-    node ~/Documents/junie-api/dist/main.js start --auth-token "$key" --port "$port"
+  if ! _cl_port_up "$port"; then
+    _cl_require_node "junie" || return 1
+    local key
+    key="$(_cl_read_junie_api_key)" || {
+      _cl_die "junie: JUNIE_API_KEY not found in environment"
+      return 1
+    }
+    if [[ ! -f "$repo_dir/dist/main.js" ]]; then
+      _cl_die "junie: proxy checkout not found at $repo_dir (set JUNIE_REPO)"
+      return 1
+    fi
+    _cl_spawn_proxy junie "$port" \
+      node "$repo_dir/dist/main.js" start --auth-token "$key" --port "$port" || return 1
+  fi
 
   local models_json i
   for i in {1..20}; do
-    models_json="$(_cl_fetch_json "http://localhost:$port/v1/models")"
+    models_json="$(_cl_fetch_json "http://localhost:$port/v1/models" "${JUNIE_AUTH_TOKEN:-}")"
 
     [[ -n "$models_json" && "$models_json" != "[]" && "$models_json" != '{"object":"list","data":[]}' ]] && break
     sleep 1
@@ -369,43 +397,60 @@ for mid, desc, status in rows:
 }
 
 # ══════════════════════════════════════════════════════════════════════════════
-#  Backend: Windsurf  (port 4142, WindsurfAPI / Docker)
+#  Backend: Devin proxy (port 3003, this repository)
 # ══════════════════════════════════════════════════════════════════════════════
 
-_cl_backend_windsurf() {
+_cl_backend_devin() {
   local model_override="${1:-}"
+  local repo_dir="${DEVIN_PROXY_DIR:-$_CLD_SIBLINGS/WindsurfAPI}"
+  local port="${DEVIN_PROXY_PORT:-}"
+  if [[ -z "$port" && -f "$repo_dir/.env" ]]; then
+    port="$(sed -n 's/^PORT=//p' "$repo_dir/.env" | tail -1)"
+  fi
+  port="${port:-3003}"
+  local base_url="${DEVIN_PROXY_BASE_URL:-http://127.0.0.1:$port}"
+  base_url="${base_url%/}"
 
   _cl_clear_env
-  export ANTHROPIC_BASE_URL=http://localhost:4142
-  export ANTHROPIC_AUTH_TOKEN=dummy
+  export ANTHROPIC_BASE_URL="$base_url"
+  # Claude Code requires a token even when the local proxy allows anonymous use.
+  local gateway_key="${DEVIN_PROXY_API_KEY:-${API_KEY:-}}"
+  if [[ -z "$gateway_key" && -f "$repo_dir/.env" ]]; then
+    gateway_key="$(sed -n 's/^API_KEY=//p' "$repo_dir/.env" | tail -1)"
+    case "$gateway_key" in
+      \"*\"|\'*\') gateway_key="${gateway_key:1:-1}" ;;
+    esac
+  fi
+  export ANTHROPIC_AUTH_TOKEN="${gateway_key:-dummy}"
 
-  _cl_spawn_proxy windsurf 4142 \
-    bash -c 'cd /home/awcator/Documents/WindsurfAPI && exec docker compose up'
-
-  if ! command -v claudecredits >/dev/null 2>&1; then
-    _cl_die "windsurf: claudecredits not found — add MyDots/bin to PATH"
-    return 1
+  if [[ -z "${DEVIN_PROXY_BASE_URL:-}" ]] && ! _cl_port_up "$port"; then
+    if [[ ! -f "$repo_dir/src/index.js" ]]; then
+      _cl_die "devin: proxy checkout not found at $repo_dir (set DEVIN_PROXY_DIR or DEVIN_PROXY_BASE_URL)"
+      return 1
+    fi
+    _cl_spawn_proxy devinproxy "$port" \
+      bash -c 'cd "$1" && exec env PORT="$2" node src/index.js' _ "$repo_dir" "$port" || return 1
   fi
 
-  local tsv
-  tsv="$(claudecredits --raw 2>/dev/null | awk -F'\t' '{printf "%s\t%s\t%s cr\n", $1, $3, $2}')"
-  [[ -z "$tsv" ]] && { _cl_die "windsurf: couldn't fetch model catalog"; return 1; }
+  local models_json tsv
+  models_json="$(_cl_fetch_json "$base_url/v1/models" "$gateway_key")"
+  [[ -z "$models_json" ]] && { _cl_die "devin: couldn't fetch models from $base_url"; return 1; }
+  tsv="$(_cl_models_to_tsv "$models_json" "${_CL_PY_SORT}"'
+import json, os
+models = json.loads(os.environ["_CL_JSON"]).get("data", [])
+rows = [(m["id"], m.get("owned_by") or "", "") for m in models if m.get("id")]
+rows.sort(key=_nkey)
+for mid, label, status in rows:
+    print("%s\t%s\t%s" % (mid, label, status))
+')"
+  [[ -z "$tsv" ]] && { _cl_die "devin: proxy returned no selectable models"; return 1; }
 
   local base
-  base="$(_cl_select_model "Windsurf models (:4142)" "$tsv" "$model_override")" \
+  base="$(_cl_select_model "Devin models ($base_url)" "$tsv" "$model_override")" \
     || return 1
 
-  # Cheapest same-vendor model for the haiku/fast slot
-  local vendor fast
-  vendor="$(_cl_vendor_of "$base")"
-  fast="$(claudecredits --raw 2>/dev/null | \grep $'\t' \
-    | awk -F'\t' -v v="$vendor" 'index(tolower($1), v) > 0 { print $2 "\t" $1 }' \
-    | sort -n | head -1 | cut -f2-)"
-  : "${fast:=$base}"
-
-  _cl_export_models "$base" "$fast"
-  _cl_log "Loaded: $ANTHROPIC_MODEL (windsurf, :4142)" \
-          "— haiku/mini: $ANTHROPIC_SMALL_FAST_MODEL"
+  _cl_export_models "$base"
+  _cl_log "Loaded: $ANTHROPIC_MODEL (devinproxy, $base_url)"
 }
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -469,9 +514,6 @@ for mid, desc, status in rows:
 # build ordered the dead cloudcode-pa prod endpoint first and lacks the
 # signature-scrubbing and Claude max-token fixes, so `acc start` fails with a
 # misleading 429 "quota exhausted" on every account.
-AG_REPO="${AG_REPO:-/home/awcator/Documents/antigravity-claude-proxy}"
-AG_PORT="${AG_PORT:-9080}"
-
 # Models the quota API advertises but that do not actually serve. Verified
 # 2026-09-17 by querying the Cloud Code API directly with a minted token:
 #   gemini-2.5-pro      503 "No capacity available for model" — retired upstream
@@ -484,28 +526,33 @@ AG_PORT="${AG_PORT:-9080}"
 # Both are still listed by every proxy endpoint, so filter them here. Override to
 # re-test, and prune entries that start working again:
 #   AG_DEAD_MODELS="gemini-2.5-pro" source claudeload antigravity
-AG_DEAD_MODELS="${AG_DEAD_MODELS:-gemini-2.5-pro gemini-3.1-pro-high}"
-
 _cl_backend_antigravity() {
   local model_override="${1:-}"
+  local repo_dir="${AG_REPO:-$_CLD_SIBLINGS/antigravity-claude-proxy}"
+  local port="${AG_PORT:-9080}"
+  local dead_models="${AG_DEAD_MODELS:-gemini-2.5-pro gemini-3.1-pro-high}"
+  local base_url="${AG_BASE_URL:-http://localhost:$port}"
+  base_url="${base_url%/}"
 
-  if [[ ! -f "$AG_REPO/src/index.js" ]]; then
-    _cl_die "antigravity: no clone at $AG_REPO (set AG_REPO to the repo path)"
+  if [[ -z "${AG_BASE_URL:-}" ]] && ! _cl_port_up "$port" && [[ ! -f "$repo_dir/src/index.js" ]]; then
+    _cl_die "antigravity: no clone at $repo_dir (set AG_REPO to the repo path)"
     return 1
   fi
 
   _cl_clear_env
-  export ANTHROPIC_BASE_URL="http://localhost:$AG_PORT"
-  export ANTHROPIC_AUTH_TOKEN=test
+  export ANTHROPIC_BASE_URL="$base_url"
+  export ANTHROPIC_AUTH_TOKEN="${AG_AUTH_TOKEN:-test}"
 
-  _cl_spawn_proxy antigravity "$AG_PORT" \
-    bash -c 'cd "$1" && exec env PORT="$2" node src/index.js' _ "$AG_REPO" "$AG_PORT"
+  if [[ -z "${AG_BASE_URL:-}" ]]; then
+    _cl_spawn_proxy antigravity "$port" \
+      bash -c 'cd "$1" && exec env PORT="$2" node src/index.js' _ "$repo_dir" "$port" || return 1
+  fi
 
   local models_json accounts_json health_json
-  models_json="$(_cl_fetch_json "http://localhost:$AG_PORT/v1/models")"
+  models_json="$(_cl_fetch_json "$base_url/v1/models" "${AG_AUTH_TOKEN:-}")"
 
-  accounts_json="$(_cl_fetch_json "http://localhost:$AG_PORT/api/accounts")"
-  health_json="$(_cl_fetch_json "http://localhost:$AG_PORT/health")"
+  accounts_json="$(_cl_fetch_json "$base_url/api/accounts" "${AG_AUTH_TOKEN:-}")"
+  health_json="$(_cl_fetch_json "$base_url/health" "${AG_AUTH_TOKEN:-}")"
 
   if [[ -z "$models_json" ]]; then
     _cl_die "antigravity: couldn't fetch models from $ANTHROPIC_BASE_URL (is the proxy + account working?)"
@@ -523,7 +570,7 @@ _cl_backend_antigravity() {
   # and fold in the listing for anything it doesn't cover.
   local catalog_json
   catalog_json="$(_AG_HEALTH="$health_json" _AG_MODELS="$models_json" \
-                  _AG_DEAD="$AG_DEAD_MODELS" python3 -c '
+                  _AG_DEAD="$dead_models" python3 -c '
 import json, os
 seen, ids, descs = set(), [], []
 dead = set((os.environ.get("_AG_DEAD") or "").split())
@@ -556,10 +603,10 @@ print(json.dumps({"object": "list",
   fi
 
   local tsv
-  tsv="$(python3 "$HOME/Documents/MyDots/bin/ag_format.py" "$catalog_json" "$accounts_json")"
+  tsv="$(python3 "$_CLD_ROOT/bin/ag_format.py" "$catalog_json" "$accounts_json")"
   
   local base
-  base="$(_cl_select_model "Antigravity models (:$AG_PORT)" "$tsv" "$model_override")" \
+  base="$(_cl_select_model "Antigravity models ($base_url)" "$tsv" "$model_override")" \
     || return 1
 
   # Use selected base model for fast/subagent companion to guarantee zero rate-limit collisions
@@ -577,7 +624,7 @@ print(json.dumps({"object": "list",
   fi
 
   _cl_export_models "$base" "$fast"
-  _cl_log "Loaded: $ANTHROPIC_MODEL (antigravity, :$AG_PORT)" \
+  _cl_log "Loaded: $ANTHROPIC_MODEL (antigravity, $base_url)" \
           "— fast/subagent: $ANTHROPIC_SMALL_FAST_MODEL"
 }
 
@@ -587,6 +634,7 @@ print(json.dumps({"object": "list",
 
 _cl_backend_aistudio() {
   local model_override="${1:-}"
+  local port="${AISTUDIO_PORT:-9083}"
 
   _cl_clear_env
 
@@ -599,7 +647,6 @@ _cl_backend_aistudio() {
 
   local models_json
   models_json="$(_cl_fetch_json \
-
     "https://generativelanguage.googleapis.com/v1beta/models?key=$GEMINI_API_KEY")"
   if [[ -z "$models_json" ]]; then
     _cl_die "aistudio: couldn't fetch models from API (is GEMINI_API_KEY valid?)"
@@ -607,7 +654,8 @@ _cl_backend_aistudio() {
   fi
 
   # Generate litellm config from the live model catalog
-  local config="/tmp/claudeload_aistudio_litellm.yaml"
+  local config
+  config="$(_cl_config_file "aistudio-$port-litellm.yaml")" || return 1
   python3 -c '
 import json, sys
 models = json.load(sys.stdin).get("models", [])
@@ -620,9 +668,9 @@ for m in models:
     print(f"      api_key: os.environ/GEMINI_API_KEY")
 ' <<< "$models_json" > "$config"
 
-  export ANTHROPIC_BASE_URL=http://localhost:9083
+  export ANTHROPIC_BASE_URL="http://localhost:$port"
   export ANTHROPIC_API_KEY=dummy
-  _cl_spawn_proxy aistudio 9083 litellm --config "$config" --port 9083
+  _cl_spawn_proxy aistudio "$port" litellm --config "$config" --port "$port" || return 1
 
   local tsv
   tsv="$(_cl_models_to_tsv "$models_json" "${_CL_PY_SORT}"'
@@ -641,7 +689,7 @@ for mid, desc, status in rows:
 ')"
 
   local base
-  base="$(_cl_select_model "Google AI Studio models (:9083)" "$tsv" "$model_override")" \
+  base="$(_cl_select_model "Google AI Studio models (:$port)" "$tsv" "$model_override")" \
     || return 1
 
   local fast
@@ -650,7 +698,7 @@ for mid, desc, status in rows:
   : "${fast:=$base}"
 
   _cl_export_models "$base" "$fast"
-  _cl_log "Loaded: $ANTHROPIC_MODEL (aistudio, :9083)" \
+  _cl_log "Loaded: $ANTHROPIC_MODEL (aistudio, :$port)" \
           "— fast/subagent: $ANTHROPIC_SMALL_FAST_MODEL"
 }
 
@@ -660,6 +708,7 @@ for mid, desc, status in rows:
 
 _cl_backend_openai() {
   local model_override="${1:-}"
+  local port="${OPENAI_PROXY_PORT:-9084}"
 
   _cl_clear_env
 
@@ -679,7 +728,8 @@ _cl_backend_openai() {
   fi
 
   # Generate litellm config from the live model catalog
-  local config="/tmp/claudeload_openai_litellm.yaml"
+  local config
+  config="$(_cl_config_file "openai-$port-litellm.yaml")" || return 1
   python3 -c '
 import json, sys
 models = json.load(sys.stdin).get("data", [])
@@ -694,9 +744,9 @@ for m in models:
     print(f"      api_key: os.environ/OPENAI_API_KEY")
 ' <<< "$models_json" > "$config"
 
-  export ANTHROPIC_BASE_URL=http://localhost:9084
+  export ANTHROPIC_BASE_URL="http://localhost:$port"
   export ANTHROPIC_API_KEY=dummy
-  _cl_spawn_proxy openai 9084 env OPENAI_API_KEY="$OPENAI_API_KEY" litellm --config "$config" --port 9084
+  _cl_spawn_proxy openai "$port" env OPENAI_API_KEY="$OPENAI_API_KEY" litellm --config "$config" --port "$port" || return 1
 
   local tsv
   tsv="$(_cl_models_to_tsv "$models_json" "${_CL_PY_SORT}"'
@@ -715,7 +765,7 @@ for mid, desc, status in rows:
 ')"
 
   local base
-  base="$(_cl_select_model "OpenAI models (:9084)" "$tsv" "$model_override")" \
+  base="$(_cl_select_model "OpenAI models (:$port)" "$tsv" "$model_override")" \
     || return 1
 
   local fast
@@ -723,7 +773,8 @@ for mid, desc, status in rows:
   : "${fast:=$base}"
 
   _cl_export_models "$base" "$fast"
-  _cl_log "Loaded: $ANTHROPIC_MODEL (openai, :9084)"           "— fast/subagent: $ANTHROPIC_SMALL_FAST_MODEL"
+  _cl_log "Loaded: $ANTHROPIC_MODEL (openai, :$port)" \
+          "— fast/subagent: $ANTHROPIC_SMALL_FAST_MODEL"
 }
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -733,9 +784,10 @@ for mid, desc, status in rows:
 _cl_backend_codexproxy() {
   local model_override="${1:-}"
   local base_url="${CODEX_PROXY_BASE_URL:-http://127.0.0.1:8081}"
+  base_url="${base_url%/}"
   local key="${CODEX_PROXY_API_KEY:-}"
-  local key_file="${CODEX_PROXY_CONFIG:-/home/awcator/Documents/codex-proxy/data/local.yaml}"
-  local compose_dir="${CODEX_PROXY_DIR:-/home/awcator/Documents/codex-proxy}"
+  local compose_dir="${CODEX_PROXY_DIR:-$_CLD_SIBLINGS/codex-proxy}"
+  local key_file="${CODEX_PROXY_CONFIG:-$compose_dir/data/local.yaml}"
 
   _cl_clear_env
 
@@ -752,21 +804,15 @@ _cl_backend_codexproxy() {
     return 1
   fi
 
-  local port="${base_url##*:}"
-  if ! _cl_port_up "$port"; then
-    # Like the other local backends, start the default local service on demand.
-    # An explicitly configured remote/custom URL remains caller-managed.
-    if [[ "$base_url" != "http://127.0.0.1:8081" && "$base_url" != "http://localhost:8081" ]]; then
-      _cl_die "codexproxy: not reachable at $base_url"
-      return 1
-    fi
+  # Start only the known local default. Custom URLs point to existing services.
+  if [[ "$base_url" == "http://127.0.0.1:8081" || "$base_url" == "http://localhost:8081" ]] && ! _cl_port_up 8081; then
     if ! command -v docker >/dev/null 2>&1 || [[ ! -f "$compose_dir/docker-compose.yml" ]]; then
       _cl_die "codexproxy: Docker Compose setup not found at $compose_dir"
       return 1
     fi
-    _cl_spawn_proxy codexproxy "$port" \
-      bash -c 'cd "$1" && exec docker compose up' _ "$compose_dir"
-    if ! _cl_port_up "$port"; then
+    _cl_spawn_proxy codexproxy 8081 \
+      bash -c 'cd "$1" && exec docker compose up' _ "$compose_dir" || return 1
+    if ! _cl_port_up 8081; then
       _cl_die "codexproxy: :8081 did not become ready after 30 seconds"
       return 1
     fi
@@ -841,6 +887,8 @@ for mid, desc, status in rows:
 
 _cl_backend_omniroute() {
   local model_override="${1:-}"
+  local base_url="${OMNIROUTE_BASE_URL:-http://localhost:20128/v1}"
+  base_url="${base_url%/}"
 
   _cl_clear_env
 
@@ -848,26 +896,35 @@ _cl_backend_omniroute() {
     _cl_warn "omniroute: OMNIROUTE_KEY not found in env (continuing anyway)"
   fi
 
-  export ANTHROPIC_BASE_URL="http://localhost:20128/v1"
+  export ANTHROPIC_BASE_URL="$base_url"
   export ANTHROPIC_API_KEY="${OMNIROUTE_KEY:-sk-dummy}"
   export CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1
 
-  _cl_spawn_proxy omniroute 20128 omniroute serve --log --no-open
+  if [[ -z "${OMNIROUTE_BASE_URL:-}" ]]; then
+    if ! _cl_port_up 20128 && ! command -v omniroute >/dev/null 2>&1; then
+      _cl_die "omniroute: command not found (install it or set OMNIROUTE_BASE_URL)"
+      return 1
+    fi
+    _cl_spawn_proxy omniroute 20128 omniroute serve --log --no-open || return 1
+  fi
 
-  local models_json i
+  local models_json active_providers i
   for i in {1..15}; do
-    models_json="$(_cl_fetch_json "http://localhost:20128/v1/models" "$ANTHROPIC_API_KEY")"
-    # OmniRoute returns all 600+ models. Filter only those whose provider is active.
-    active_providers=$(omniroute providers list | awk '/active/{print $2}' | paste -sd "," -)
-    models_json=$(echo "$models_json" | jq --arg providers "$active_providers" '.data = [.data[] | select(.owned_by as $o | ($providers | contains($o)) and (.id | test("-low$|-medium$|-high$|-xhigh$|-tiered$|^auto/|/auto$|^kiro/|^gemini-web/") | not))]')
-
+    models_json="$(_cl_fetch_json "$base_url/models" "$ANTHROPIC_API_KEY")"
+    # A local OmniRoute install can identify which catalog providers are active.
+    if [[ -n "$models_json" && -z "${OMNIROUTE_BASE_URL:-}" ]] && command -v omniroute >/dev/null 2>&1 && command -v jq >/dev/null 2>&1; then
+      active_providers="$(omniroute providers list | awk '/active/{print $2}' | paste -sd "," -)"
+      if [[ -n "$active_providers" ]]; then
+        models_json="$(printf '%s' "$models_json" | jq --arg providers "$active_providers" '.data = [.data[] | select(.owned_by as $o | ($providers | contains($o)) and (.id | test("-low$|-medium$|-high$|-xhigh$|-tiered$|^auto/|/auto$|^kiro/|^gemini-web/") | not))]')"
+      fi
+    fi
 
     [[ -n "$models_json" && "$models_json" != "[]" && "$models_json" != '{"object":"list","data":[]}' ]] && break
     sleep 1
   done
 
   if [[ -z "$models_json" || "$models_json" == "[]" || "$models_json" == '{"object":"list","data":[]}' ]]; then
-    _cl_die "omniroute: couldn't fetch models from :20128"
+    _cl_die "omniroute: couldn't fetch models from $base_url"
     return 1
   fi
 
@@ -893,7 +950,7 @@ for mid, desc, status in rows:
 ')"
 
   local base
-  base="$(_cl_select_model "OmniRoute models (:20128)" "$tsv" "$model_override")" \
+  base="$(_cl_select_model "OmniRoute models ($base_url)" "$tsv" "$model_override")" \
     || return 1
 
   local all fast sonnet
@@ -903,7 +960,7 @@ for mid, desc, status in rows:
   : "${fast:=$base}" "${sonnet:=$base}"
 
   _cl_export_models "$base" "$fast" "$sonnet"
-  _cl_log "Loaded: $ANTHROPIC_MODEL (omniroute, :20128)" \
+  _cl_log "Loaded: $ANTHROPIC_MODEL (omniroute, $base_url)" \
           "— sonnet: $ANTHROPIC_DEFAULT_SONNET_MODEL," \
           "haiku/subagent: $ANTHROPIC_SMALL_FAST_MODEL"
 }
@@ -914,24 +971,33 @@ for mid, desc, status in rows:
 
 _cl_backend_strata() {
   local model_override="${1:-}"
+  local repo_dir="${STRATA_REPO:-$_CLD_SIBLINGS/Strata}"
+  local base_url="${STRATA_BASE_URL:-http://127.0.0.1:8080}"
+  base_url="${base_url%/}"
 
   _cl_clear_env
 
-  export ANTHROPIC_BASE_URL=http://127.0.0.1:8080
-  export ANTHROPIC_AUTH_TOKEN=test
+  export ANTHROPIC_BASE_URL="$base_url"
+  export ANTHROPIC_AUTH_TOKEN="${STRATA_AUTH_TOKEN:-test}"
 
-  _cl_spawn_proxy strata 8080 \
-    bash -c 'cd /home/awcator/Documents/Strata && exec ./run-uncensored.sh'
+  if [[ -z "${STRATA_BASE_URL:-}" ]]; then
+    if ! _cl_port_up 8080 && [[ ! -f "$repo_dir/run-uncensored.sh" ]]; then
+      _cl_die "strata: proxy checkout not found at $repo_dir (set STRATA_REPO)"
+      return 1
+    fi
+    _cl_spawn_proxy strata 8080 \
+      bash -c 'cd "$1" && exec ./run-uncensored.sh' _ "$repo_dir" || return 1
+  fi
 
   local models_json i
-  for i in {1..15}; do
-    models_json="$(_cl_fetch_json "http://127.0.0.1:8080/v1/models")"
+  for ((i=0; i<15; i++)); do
+    models_json="$(_cl_fetch_json "$base_url/v1/models" "${STRATA_AUTH_TOKEN:-}")"
     [[ -n "$models_json" && "$models_json" != "[]" && "$models_json" != '{"object":"list","data":[]}' ]] && break
     sleep 1
   done
 
   if [[ -z "$models_json" || "$models_json" == "[]" || "$models_json" == '{"object":"list","data":[]}' ]]; then
-    _cl_die "strata: couldn't fetch models from :8080"
+    _cl_die "strata: couldn't fetch models from $base_url"
     return 1
   fi
 
@@ -953,7 +1019,7 @@ for mid, desc, status in rows:
 ')"
 
   local base
-  base="$(_cl_select_model "Strata models (:8080)" "$tsv" "$model_override")" \
+  base="$(_cl_select_model "Strata models ($base_url)" "$tsv" "$model_override")" \
     || return 1
 
   _cl_export_models "$base"
@@ -962,9 +1028,9 @@ for mid, desc, status in rows:
   # is assumed to be 200k.  Declare the engine's real one, so the context meter
   # and proactive auto-compaction both use it.  Keep this equal to the config's
   # --max-context (strata-uncensored-ud-q4_k_xl.json).
-  export CLAUDE_CODE_MAX_CONTEXT_TOKENS=131072
+  export CLAUDE_CODE_MAX_CONTEXT_TOKENS="${STRATA_CONTEXT_TOKENS:-131072}"
 
-  _cl_log "Loaded: $ANTHROPIC_MODEL (strata, :8080)" \
+  _cl_log "Loaded: $ANTHROPIC_MODEL (strata, $base_url)" \
           "— context: $CLAUDE_CODE_MAX_CONTEXT_TOKENS (declared)"
 }
 
@@ -973,16 +1039,17 @@ for mid, desc, status in rows:
 
 case "${1:-}" in
   ""|menu|m)
-    if _prof="$(_cl_pick "Choose Claude Code backend" $'omniroute\tOmniRoute Server (:20128)\nstrata\tStrata local Qwen Coder (:8080)\ncodexproxy\tLocal Codex Proxy (Docker, :8081)\nopenai\tOpenAI / ChatGPT via LiteLLM (:9084)\ncopilot\tGitHub Copilot proxy (:4141)\njunie\tJetBrains Junie proxy (:4143)\nwindsurf\tWindsurf API proxy (:4142)\ndeepseek\tDeepSeek direct API\nantigravity\tAntigravity account proxy (:9080)\naistudio\tGoogle AI Studio via LiteLLM (:9083)')"; then
+    if _prof="$(_cl_pick "Choose Claude Code backend" $'omniroute\tOmniRoute Server\nstrata\tStrata local Qwen Coder\ncodexproxy\tCodex Proxy (Docker)\nopenai\tOpenAI via LiteLLM\ncopilot\tGitHub Copilot proxy\njunie\tJetBrains Junie proxy\ndevin\tDevin proxy\ndeepseek\tDeepSeek direct API\nantigravity\tAntigravity account proxy\naistudio\tGoogle AI Studio via LiteLLM')"; then
       source "$_CLD_SELF" "$_prof"
     else
       echo "  cancelled" >&2
+      false
     fi
     ;;
 
   copilot|cop|opus)    _cl_backend_copilot   "${2:-}" ;;
   junie|jb)            _cl_backend_junie     "${2:-}" ;;
-  windsurf|ws)         _cl_backend_windsurf  "${2:-}" ;;
+  devin|dv)            _cl_backend_devin     "${2:-}" ;;
   deepseek)            _cl_backend_deepseek  "${2:-}" ;;
   antigravity|ag)      _cl_backend_antigravity "${2:-}" ;;
   aistudio|ai)         _cl_backend_aistudio  "${2:-}" ;;
@@ -1000,23 +1067,35 @@ case "${1:-}" in
 claudeload — switch Claude Code backend
 
   (no args)   interactive menu: pick backend → pick model
-  copilot     interactive: pick base (port 4141, copilot-api)
-  junie       JetBrains Junie proxy via npx junie-api (default port 4143)
-  windsurf    interactive: show catalog+credits, pick base (port 4142, WindsurfAPI)
+  copilot     GitHub Copilot proxy
+  junie       JetBrains Junie proxy
+  devin       interactive: pick a live model from Devin proxy
   deepseek    DeepSeek models (api.deepseek.com)
-  antigravity interactive: pick base (port 9080, antigravity-claude-proxy)
-  aistudio    Google AI Studio via litellm (port 9083)
-  openai      OpenAI / ChatGPT via litellm (port 9084)
-  codexproxy  Codex Proxy via Docker (port 8081; live Codex model picker)
-  omniroute   OmniRoute server (:20128, omniroute serve)
-  strata      Strata local Qwen Coder model (:8080)
+  antigravity Antigravity account proxy
+  aistudio    Google AI Studio via LiteLLM
+  openai      OpenAI via LiteLLM
+  codexproxy  Codex Proxy via Docker
+  omniroute   OmniRoute server
+  strata      Strata local Qwen Coder
   status      show current config
 
-Usage: source claudeload <profile> [model]
-Proxies run foreground in tmux session 'proxies' (spawned only if their port is down).
+Usage: source /path/to/MyDots/bin/claudeload <profile> [model]
+Proxies run in tmux session 'proxies' when a local service is needed.
+Local checkouts default to sibling directories of this repo. Override with
+JUNIE_REPO, DEVIN_PROXY_DIR, AG_REPO, CODEX_PROXY_DIR, or STRATA_REPO.
+Existing services can be selected with COPILOT_BASE_URL, DEVIN_PROXY_BASE_URL,
+AG_BASE_URL, CODEX_PROXY_BASE_URL, OMNIROUTE_BASE_URL, or STRATA_BASE_URL.
+Use the service origin for these URLs; OMNIROUTE_BASE_URL includes /v1.
+Set DEVIN_PROXY_API_KEY for a protected Devin proxy. Local port overrides:
+JUNIE_PORT, DEVIN_PROXY_PORT, AG_PORT, AISTUDIO_PORT, OPENAI_PROXY_PORT.
+COPILOT_AUTH_TOKEN, JUNIE_AUTH_TOKEN, AG_AUTH_TOKEN, and STRATA_AUTH_TOKEN
+configure authentication for those proxies when needed.
+COPILOT_ACCOUNT_TYPE, STRATA_CONTEXT_TOKENS, and CLAUDELOAD_MAX_OUTPUT_TOKENS
+override their respective defaults.
 EOF
     ;;
 esac
+_CLD_RESULT=$?
 
 # ── Global flags (applied regardless of backend) ─────────────────────────────
 export DISABLE_NON_ESSENTIAL_MODEL_CALLS=1
@@ -1030,3 +1109,7 @@ export CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
 if [[ -z "${CLAUDE_CODE_MAX_CONTEXT_TOKENS:-}" ]]; then
   export CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT=1
 fi
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+  exit "$_CLD_RESULT"
+fi
+return "$_CLD_RESULT"

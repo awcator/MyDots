@@ -4,6 +4,7 @@
 
 CL="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../claudeload"
 OUT="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/model_combinations.tsv"
+MYDOTS_ROOT="$(dirname "$(dirname "$(readlink -f "$CL")")")"
 
 printf "BACKEND\tBASE\tOPUS\tSONNET\tHAIKU\tFAST\tSUBAGENT\tEFFORT\tVERDICT\n" > "$OUT"
 
@@ -125,24 +126,29 @@ else
   echo "⏭ AI STUDIO: port 9083 down"
 fi
 
-# ── Windsurf (:4142) ──
-if curl -sf http://localhost:4142/v1/models >/dev/null 2>&1; then
-  echo "▶ WINDSURF (:4142)"
-  if command -v claudecredits >/dev/null 2>&1; then
-    mapfile -t MODELS < <(claudecredits --raw 2>/dev/null | grep $'\t' | cut -f1)
-    echo "  ${#MODELS[@]} models"
-    for m in "${MODELS[@]}"; do test_combo windsurf "$m"; done
-  fi
+# ── Devin proxy ──
+DEVIN_TEST_URL="${DEVIN_PROXY_BASE_URL:-http://127.0.0.1:${DEVIN_PROXY_PORT:-3003}}"
+DEVIN_TEST_KEY="${DEVIN_PROXY_API_KEY:-${API_KEY:-dummy}}"
+if curl -sf -H "Authorization: Bearer $DEVIN_TEST_KEY" "$DEVIN_TEST_URL/v1/models" >/dev/null 2>&1; then
+  echo "▶ DEVIN ($DEVIN_TEST_URL)"
+  mapfile -t MODELS < <(curl -sf -H "Authorization: Bearer $DEVIN_TEST_KEY" "$DEVIN_TEST_URL/v1/models" \
+    | python3 -c 'import json,sys
+for model in json.load(sys.stdin).get("data", []):
+    if model.get("id"): print(model["id"])
+' | sort -u -V)
+  echo "  ${#MODELS[@]} models"
+  for m in "${MODELS[@]}"; do test_combo devin "$m"; done
   echo ""
 else
-  echo "⏭ WINDSURF: port 4142 down"
+  echo "⏭ DEVIN: proxy unavailable at $DEVIN_TEST_URL"
 fi
 
 # ── Codex Proxy (:8081) ──
 CODEX_PROXY_BASE_URL="${CODEX_PROXY_BASE_URL:-http://127.0.0.1:8081}"
 CODEX_PROXY_KEY="${CODEX_PROXY_API_KEY:-}"
-if [[ -z "$CODEX_PROXY_KEY" && -r /home/awcator/Documents/codex-proxy/data/local.yaml ]]; then
-  CODEX_PROXY_KEY="$(sed -n 's/^[[:space:]]*proxy_api_key:[[:space:]]*//p' /home/awcator/Documents/codex-proxy/data/local.yaml | head -n 1)"
+CODEX_PROXY_CONFIG="${CODEX_PROXY_CONFIG:-$(dirname "$MYDOTS_ROOT")/codex-proxy/data/local.yaml}"
+if [[ -z "$CODEX_PROXY_KEY" && -r "$CODEX_PROXY_CONFIG" ]]; then
+  CODEX_PROXY_KEY="$(sed -n 's/^[[:space:]]*proxy_api_key:[[:space:]]*//p' "$CODEX_PROXY_CONFIG" | head -n 1)"
   CODEX_PROXY_KEY="${CODEX_PROXY_KEY#\"}"; CODEX_PROXY_KEY="${CODEX_PROXY_KEY%\"}"
   CODEX_PROXY_KEY="${CODEX_PROXY_KEY#\'}"; CODEX_PROXY_KEY="${CODEX_PROXY_KEY%\'}"
 fi
