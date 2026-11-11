@@ -7,21 +7,26 @@ from pathlib import Path
 
 _DATA_FILE = Path(__file__).with_name("model_ranking.json")
 _EFFORT_SUFFIXES = (
-    "-priority", "-lightning", "-fast", "-thinking", "-1m",
+    "-contributor-free", "-priority", "-lightning", "-fast", "-thinking", "-1m",
     "-minimal", "-medium", "-xhigh", "-tiered", "-high",
-    "-none", "-low", "-max",
+    "-none", "-low", "-max", "-ultra", "-500k", "-free",
+    "-nvfp4", "-fp8", "-q4-k-m", "-q5-k-m", "-q8-0",
+    "-iq4-xs", "-iq3-s-imat", "-preview",
 )
-_DATE_SUFFIX = re.compile(r"-20\d{2}-\d{2}-\d{2}$")
+_DATE_SUFFIX = re.compile(r"-20\d{2}(?:-\d{2}-\d{2}|\d{4})$")
 _TOKEN = re.compile(r"(?<![a-z0-9])(?:%s)(?![a-z0-9])")
-_GROUPS = (
-    "Unknown / new models · unranked",
-    "Coding models · strongest first",
-    "👁️ Vision models",
-    "🎨 Image models",
-    "🎬 Video models",
-    "🎧 Audio models",
-    "🧩 Other non-coding models",
-)
+_GROUPS = {
+    "unknown": "Unknown / new models · unranked",
+    "coding": "Coding models · strongest first",
+    "known": "Known coding models · strength not rated",
+    "route": "🔀 Automatic routes · model varies",
+    "vision": "👁️ Vision models",
+    "image": "🎨 Image models",
+    "video": "🎬 Video models",
+    "audio": "🎧 Audio models",
+    "other": "🧩 Other non-coding models",
+}
+_GROUP_ORDER = {name: index for index, name in enumerate(_GROUPS)}
 
 
 def _natural_key(value):
@@ -30,24 +35,34 @@ def _natural_key(value):
 
 
 def _normalize(value):
-    value = value.casefold().rsplit("/", 1)[-1].replace("_", "-")
+    value = value.casefold().rsplit("/", 1)[-1]
+    value = re.sub(r"\s*\([^)]*\)", "", value)
+    value = re.sub(r"[\s_:]+", "-", value)
     value = re.sub(r"(?<=\d)\.(?=\d)", "-", value)
-    return value.replace(":", "-")
+    value = re.sub(r"^(gpt|gemma|haiku|opus|sonnet)(?=\d)", r"\1-", value)
+    value = re.sub(r"^claude-(\d+(?:-\d+)?)-(opus|sonnet|haiku)(?=$|-)",
+                   r"claude-\2-\1", value)
+    value = re.sub(r"^(opus|sonnet|haiku)-", r"claude-\1-", value)
+    value = re.sub(r"^gpt-4-o(?=$|-)", "gpt-4o", value)
+    return value.strip("-")
 
 
-def _model_candidates(model_id):
-    value = _normalize(model_id)
-    yield value
-    while True:
+def _model_candidates(value):
+    value = _normalize(value)
+    for prefix in ("openrouter-", "together-"):
+        if value.startswith(prefix):
+            value = _normalize(value[len(prefix):])
+            break
+    while value:
+        yield value
         without_date = _DATE_SUFFIX.sub("", value)
         if without_date != value:
             value = without_date
-        else:
-            suffix = next((part for part in _EFFORT_SUFFIXES if value.endswith(part)), None)
-            if suffix is None:
-                return
-            value = value[:-len(suffix)]
-        yield value
+            continue
+        suffix = next((part for part in _EFFORT_SUFFIXES if value.endswith(part)), None)
+        if suffix is None:
+            return
+        value = value[:-len(suffix)]
 
 
 def _contains(value, words):
@@ -57,22 +72,22 @@ def _contains(value, words):
 def _kind(model_id, status):
     value = _normalize(model_id)
     if model_id.casefold().startswith("aihorde/"):
-        return 3, "🎨", "image"
+        return "image", "🎨"
     if _contains(value, "video|veo|sora|seedance|runway"):
-        return 4, "🎬", "video"
+        return "video", "🎬"
     if _contains(value, "image|images|imagen|flux|sdxl|diffusion|dall-e|"
                         "nano-banana|midjourney|ideogram|recraft|seedream|inpainting"):
-        return 3, "🎨", "image"
+        return "image", "🎨"
     if _contains(value, "audio|speech|tts|voice|music|whisper|transcribe|sound"):
-        return 5, "🎧", "audio"
+        return "audio", "🎧"
     if (_contains(value, "vision|vl") or
             re.search(r"(?:^|-)glm-\d+-\d+v(?:$|-)", value)):
-        return 2, "👁️", "vision"
+        return "vision", "👁️"
     if (_contains(value, "embedding|embeddings|embed|rerank|moderation|"
                         "search|document|scholar|social") or
             "non-text" in status.casefold()):
-        return 6, "🧩", "other"
-    return 0, "", "coding"
+        return "other", "🧩"
+    return "coding", ""
 
 
 def order_models(items):
@@ -84,23 +99,32 @@ def order_models(items):
     ranks = {_normalize(model): index for index, model in enumerate(data.get("coding_order", []))}
     aliases = {_normalize(key): _normalize(value)
                for key, value in data.get("aliases", {}).items()}
+    known = {_normalize(model) for model in data.get("known_unranked", [])}
 
     def decorated(row):
         model_id, title, status = row
-        kind_order, icon, _ = _kind(model_id, status)
-        if kind_order:
-            group = kind_order
+        kind, icon = _kind(model_id, status)
+        if kind != "coding":
+            group = kind
             rank = len(ranks)
+        elif (model_id.startswith("auto/") or
+              model_id.rsplit("/", 1)[-1] == "auto" or
+              model_id.startswith("aug/prism-")):
+            group, rank = "route", len(ranks)
         else:
             rank = len(ranks)
-            for candidate in _model_candidates(model_id):
-                canonical = candidate
-                canonical = aliases.get(canonical, canonical)
-                if canonical in ranks:
-                    rank = ranks[canonical]
+            group = "unknown"
+            for source in (model_id, title):
+                for candidate in _model_candidates(source):
+                    canonical = aliases.get(candidate, candidate)
+                    if canonical in ranks:
+                        rank, group = ranks[canonical], "coding"
+                        break
+                    if canonical in known and group == "unknown":
+                        group = "known"
+                if group == "coding":
                     break
-            group = 1 if rank < len(ranks) else 0
         item = (model_id, title, status, icon, _GROUPS[group])
-        return (group, rank, _natural_key(model_id)), item
+        return (_GROUP_ORDER[group], rank, _natural_key(model_id)), item
 
     return [item for _, item in sorted(map(decorated, items), key=lambda entry: entry[0])]
