@@ -22,6 +22,8 @@ _GROUPS = {
     "unknown": "Unknown / new models · unranked",
     "coding": "Coding models · strongest first",
     "known": "Known coding models · strength not rated",
+    "completion": "⌨️ Code completion only · not Claude Code chat",
+    "decision": "🎯 Decision only · not Claude Code chat",
     "route": "🔀 Automatic routes · model varies",
     "vision": "👁️ Vision models",
     "image": "🎨 Image models",
@@ -75,6 +77,10 @@ def _contains(value, words):
 
 def _kind(model_id, status):
     value = _normalize(model_id)
+    if value == "gpt-41-copilot":
+        return "completion", "⌨️"
+    if value == "gpt-6-luna-decisions":
+        return "decision", "🎯"
     if value == "codex-auto-review":
         return "other", "🧩"
     if model_id.casefold().startswith("aihorde/"):

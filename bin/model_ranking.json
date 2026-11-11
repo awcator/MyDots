@@ -1,5 +1,5 @@
 {
-  "note": "Coding-strength order for Claude Code. The leading entries use Vals AI Terminal-Bench 4.0 (2026-11-09); SWE-2 and SWE-2 Flash placement also considers Cognition coding evaluations. Remaining entries retain the earlier local snapshot and family ordering, so close cross-family positions are estimates. Provider IDs stay separate. New IDs appear first; known models without comparable strength data appear after ranked coding models. Sources: https://www.vals.ai/benchmarks/terminal-bench-4 , https://cognition.com/blog/swe-2-flash , https://developers.openai.com/api/docs/guides/model-selection , https://openrouter.ai/docs/api/api-reference/models/list-all-models-and-their-properties . No ranking API is called at runtime.",
+  "note": "Coding-strength order for Claude Code. The leading entries use Vals AI Terminal-Bench 4.0 (2026-11-09); SWE model placement also considers Cognition coding evaluations. Nemotron 3.5 Super and MAI-Code 1.1 Flash placement considers NVIDIA and Microsoft coding evaluations. Older OpenAI families follow official model guidance. Remaining entries retain the earlier local snapshot and family ordering, so close cross-family positions are estimates. Provider IDs stay separate. New IDs appear first; known models without comparable strength data appear after ranked coding models. Sources: https://www.vals.ai/benchmarks/terminal-bench-4 , https://cognition.com/blog/swe-2-flash , https://cognition.com/blog/swe-1-7 , https://research.nvidia.com/labs/nemotron/Nemotron-3.5-Super-and-Lightning/ , https://microsoft.ai/news/mai-code-1-1-flash-br-better-faster-at-a-quarter-of-the-cost/ , https://developers.openai.com/api/docs/models/all , https://openrouter.ai/docs/api/api-reference/models/list-all-models-and-their-properties . No ranking API is called at runtime.",
   "coding_order": [
     "claude-fable-5.2",
     "claude-opus-5.5",
@@ -37,6 +37,7 @@
     "muse-spark-1.3",
     "gpt-5.5-pro",
     "gpt-5.5",
+    "swe-1.7",
     "claude-opus-4.7",
     "claude-opus-4.6",
     "claude-opus-4.5",
@@ -90,6 +91,8 @@
     "ling-3.0-flash",
     "gpt-5.1",
     "gemini-3.5-flash-lite",
+    "mai-code-1.1-flash",
+    "nemotron-3.5-super",
     "nemotron-3-ultra-550b-a55b",
     "muse-glimmer-30b",
     "qwen3.5-397b-a17b",
@@ -113,6 +116,7 @@
     "step-3.7-flash",
     "gemma-4-26b-a4b-it",
     "gpt-5",
+    "o3",
     "nemotron-3-super-120b-a12b",
     "qwen3.5-35b-a3b",
     "north-mini-code",
@@ -139,6 +143,7 @@
     "kimi-k2-thinking",
     "gpt-oss-20b",
     "mistral-medium-3.1",
+    "swe-1.6",
     "gpt-4.1-mini",
     "mistral-large-2512",
     "llama-4-maverick",
@@ -151,6 +156,7 @@
     "gpt-4",
     "llama-3.3-70b-instruct",
     "gpt-4o-mini",
+    "gpt-5-nano",
     "gpt-4.1-nano",
     "gemma-3-27b-it",
     "ministral-8b-2512",
@@ -159,12 +165,11 @@
     "gemma-3-12b-it",
     "llama-3.1-8b-instruct",
     "ministral-3b-2512",
-    "gemma-3-4b-it"
+    "gemma-3-4b-it",
+    "gpt-3.5-turbo"
   ],
   "known_unranked": [
     "gpt-5.3",
-    "gpt-5-nano",
-    "gpt-3.5-turbo",
     "o3-mini",
     "o4-mini",
     "gemini-1.5-flash",
@@ -188,14 +193,8 @@
     "nemotron-3-nano-4b",
     "qwen3-0.6b",
     "felo-chat",
-    "mai-code-1.1-flash",
-    "gpt-41-copilot",
-    "swe-1.6",
-    "swe-1.7",
     "hy3",
-    "sonar-pro",
-    "nemotron-3.5-super",
-    "o3"
+    "sonar-pro"
   ],
   "aliases": {
     "claude-5-fable": "claude-fable-5",
