@@ -230,7 +230,7 @@ _cl_vendor_of() {
 _cl_pick() {
   local title="$1" tsv="$2" mode="${3:-}"
   local out
-  out="$(printf '%s' "$tsv" | python3 "$_CLD_ROOT/bin/cl_picker.py" "$title" "$mode")"
+  out="$(printf '%s' "$tsv" | python3 -B "$_CLD_ROOT/bin/cl_picker.py" "$title" "$mode")"
   local rc=$?
   if [[ $rc -eq 0 && -n "$out" ]]; then
     printf '%s' "$out"
