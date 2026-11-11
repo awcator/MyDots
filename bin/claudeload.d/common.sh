@@ -223,14 +223,14 @@ _cl_vendor_of() {
 #  Interactive Model Picker
 # ══════════════════════════════════════════════════════════════════════════════
 
-# _cl_pick "<title>" "<tsv>"
+# _cl_pick "<title>" "<tsv>" [models]
 # Print a colored numbered table to stderr, read a choice from the terminal,
 # echo the chosen id to stdout.  TSV columns: id <TAB> label <TAB> status.
 # Returns 1 if the user quits.
 _cl_pick() {
-  local title="$1" tsv="$2"
+  local title="$1" tsv="$2" mode="${3:-}"
   local out
-  out="$(printf '%s' "$tsv" | python3 "$_CLD_ROOT/bin/cl_picker.py" "$title")"
+  out="$(printf '%s' "$tsv" | python3 "$_CLD_ROOT/bin/cl_picker.py" "$title" "$mode")"
   local rc=$?
   if [[ $rc -eq 0 && -n "$out" ]]; then
     printf '%s' "$out"
@@ -271,7 +271,7 @@ _cl_select_model() {
     printf '%s' "$override"
     return 0
   fi
-  _cl_pick "$title" "$tsv" || { echo "  cancelled" >&2; return 1; }
+  _cl_pick "$title" "$tsv" models || { echo "  cancelled" >&2; return 1; }
 }
 
 # ══════════════════════════════════════════════════════════════════════════════

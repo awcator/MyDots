@@ -3,6 +3,7 @@
 Generic Interactive Terminal Picker
 Reads TSV from stdin (or file): ID [TAB] Title [TAB] Status
 Returns the selected ID on stdout.
+The optional "models" mode groups entries using the local ranking file.
 """
 
 import os
@@ -12,6 +13,9 @@ import sys
 import termios
 import tty
 import unicodedata
+from itertools import groupby
+
+from model_order import order_models
 
 RESET = "\033[0m"
 BOLD  = "\033[1m"
@@ -34,8 +38,8 @@ def strip_ansi(s):
     return re.sub(r'\033\[[^m]*m', '', s)
 
 def vis_len(s):
-    return sum(0 if unicodedata.combining(ch) else
-               2 if unicodedata.east_asian_width(ch) in "WF" else 1
+    return sum(0 if unicodedata.category(ch) in ("Mn", "Me", "Cf") else
+               2 if ch == "👁" or unicodedata.east_asian_width(ch) in "WF" else 1
                for ch in strip_ansi(s))
 
 def fit_text(text, width):
@@ -80,8 +84,9 @@ def get_termsize():
         return 100, 30
 
 def format_cell(item, index, width, selected):
-    mid, title, status = item
-    label = f" {index + 1:>3}) {mid}"
+    mid, title, status = item[:3]
+    icon = item[3] if len(item) > 3 else ""
+    label = f" {index + 1:>3}) {icon + ' ' if icon else ''}{mid}"
     if title and title != mid:
         label += f" · {title}"
     if status:
@@ -89,11 +94,48 @@ def format_cell(item, index, width, selected):
     color = C_SEL_BG + C_SEL_FG if selected else C_ID
     return color + fit_text(label, width) + RESET
 
-def render_ui(items, selected_idx, filter_text, heading_title):
+def make_layout(items, columns, model_mode):
+    """Lay out each model section on its own grid; headings are not choices."""
+    layout = []
+    groups = (groupby(enumerate(items), lambda pair: pair[1][4])
+              if model_mode else [("", enumerate(items))])
+    for name, entries in groups:
+        indexes = [index for index, _ in entries]
+        if model_mode:
+            layout.append((f"{name} ({len(indexes)})", None))
+        for start in range(0, len(indexes), columns):
+            layout.append(("", indexes[start:start + columns]))
+    positions = {index: (row, col)
+                 for row, (_, indexes) in enumerate(layout) if indexes
+                 for col, index in enumerate(indexes)}
+    return layout, positions
+
+def move_selection(layout, positions, selected_idx, key, page_rows):
+    if selected_idx not in positions:
+        return selected_idx
+    row, col = positions[selected_idx]
+    indexes = layout[row][1]
+    if key == "LEFT":
+        return indexes[max(0, col - 1)]
+    if key == "RIGHT":
+        return indexes[min(len(indexes) - 1, col + 1)]
+    direction = -1 if key in ("UP", "PGUP") else 1
+    distance = page_rows if key in ("PGUP", "PGDN") else 1
+    target = max(0, min(row + direction * distance, len(layout) - 1))
+    while 0 <= target < len(layout) and layout[target][1] is None:
+        target += direction
+    if not 0 <= target < len(layout):
+        return selected_idx
+    target_indexes = layout[target][1]
+    return target_indexes[min(col, len(target_indexes) - 1)]
+
+def render_ui(items, selected_idx, filter_text, heading_title, model_mode=False):
     tw, th = get_termsize()
 
     if filter_text:
-        visible = [m for m in items if filter_text.lower() in m[0].lower() or filter_text.lower() in m[1].lower()]
+        query = filter_text.casefold()
+        visible = [m for m in items if any(query in field.casefold()
+                   for field in (m[0], m[1], m[4] if model_mode else ""))]
     else:
         visible = items
 
@@ -101,9 +143,10 @@ def render_ui(items, selected_idx, filter_text, heading_title):
     selected_idx = max(0, min(selected_idx, total_vis - 1))
     columns = min(MAX_COLUMNS, max(1, (tw - 2) // MIN_CELL_WIDTH))
     max_rows = max(1, th - 8)
-    page_size = max_rows * columns
-    page_start = (selected_idx // page_size) * page_size
-    page_end = min(page_start + page_size, total_vis)
+    layout, positions = make_layout(visible, columns, model_mode)
+    selected_row = positions.get(selected_idx, (0, 0))[0]
+    page_start = (selected_row // max_rows) * max_rows
+    page_end = min(page_start + max_rows, len(layout))
     cell_space = tw - 2 - (columns - 1)
     widths = [cell_space // columns + (col < cell_space % columns)
               for col in range(columns)]
@@ -114,15 +157,23 @@ def render_ui(items, selected_idx, filter_text, heading_title):
     lines.append(hdr)
 
     search = f"  Search: {filter_text}▌  (type to filter)"
+    if model_mode:
+        search += (f"   [{visible[selected_idx][4]}]" if visible else "")
     lines.append(C_BORDER + "║" + RESET + C_WARN + fit_text(search, tw - 2) + RESET + C_BORDER + "║" + RESET)
     lines.append(C_BORDER + "╠" + "═" * (tw - 2) + "╣" + RESET)
 
-    for row in range((page_end - page_start + columns - 1) // columns):
+    page_indexes = []
+    for name, indexes in layout[page_start:page_end]:
+        if indexes is None:
+            lines.append(C_BORDER + "║" + RESET + C_HEADER + BOLD +
+                         fit_text(f"  {name}", tw - 2) + RESET + C_BORDER + "║" + RESET)
+            continue
+        page_indexes.extend(indexes)
         cells = []
         for col, width in enumerate(widths):
-            index = page_start + row * columns + col
+            index = indexes[col] if col < len(indexes) else None
             cells.append(format_cell(visible[index], index, width, index == selected_idx)
-                         if index < page_end else " " * width)
+                         if index is not None else " " * width)
         separator = C_BORDER + "│" + RESET
         lines.append(C_BORDER + "║" + RESET + separator.join(cells) + C_BORDER + "║" + RESET)
 
@@ -130,8 +181,8 @@ def render_ui(items, selected_idx, filter_text, heading_title):
         msg = f"  No matches found for '{filter_text}'"
         lines.append(C_BORDER + "║" + RESET + C_WARN + fit_text(msg, tw - 2) + RESET + C_BORDER + "║" + RESET)
 
-    if total_vis > page_size:
-        hint = f"  {page_start + 1}–{page_end} of {total_vis}  ·  PgUp/PgDn: page"
+    if len(layout) > max_rows and page_indexes:
+        hint = f"  {page_indexes[0] + 1}–{page_indexes[-1] + 1} of {total_vis}  ·  PgUp/PgDn: page"
         lines.append(C_BORDER + "║" + RESET + DIM + fit_text(hint, tw - 2) + RESET + C_BORDER + "║" + RESET)
 
     lines.append(C_BORDER + "╠" + "═" * (tw - 2) + "╣" + RESET)
@@ -140,7 +191,7 @@ def render_ui(items, selected_idx, filter_text, heading_title):
     lines.append(C_BORDER + "╚" + "═" * (tw - 2) + "╝" + RESET)
 
     write_tty("\033[H\033[2J" + "\n".join(lines) + "\n")
-    return visible, selected_idx, columns, page_size
+    return visible, selected_idx, layout, positions, max_rows
 
 def read_char(fd):
     data = os.read(fd, 1)
@@ -189,7 +240,11 @@ def main():
     items = read_tsv()
     if not items:
         sys.exit(1)
-        
+
+    model_mode = len(sys.argv) > 2 and sys.argv[2] == "models"
+    if model_mode:
+        items = order_models(items)
+
     heading_title = sys.argv[1] if len(sys.argv) > 1 else "Picker"
 
     write_tty("\033[?1049h\033[?25l")
@@ -198,22 +253,14 @@ def main():
 
     try:
         while True:
-            visible, selected_idx, columns, page_size = render_ui(items, selected_idx, filter_text, heading_title)
+            visible, selected_idx, layout, positions, page_rows = render_ui(
+                items, selected_idx, filter_text, heading_title, model_mode
+            )
 
             key = read_key()
 
-            if key == "UP":
-                selected_idx = max(0, selected_idx - columns)
-            elif key == "DOWN":
-                selected_idx = min(len(visible) - 1, selected_idx + columns)
-            elif key == "LEFT" and selected_idx % columns:
-                selected_idx -= 1
-            elif key == "RIGHT" and selected_idx % columns < columns - 1:
-                selected_idx = min(len(visible) - 1, selected_idx + 1)
-            elif key == "PGUP":
-                selected_idx = max(0, selected_idx - page_size)
-            elif key == "PGDN":
-                selected_idx = min(len(visible) - 1, selected_idx + page_size)
+            if key in ("UP", "DOWN", "LEFT", "RIGHT", "PGUP", "PGDN"):
+                selected_idx = move_selection(layout, positions, selected_idx, key, page_rows)
             elif key in ("\r", "\n"):
                 if visible:
                     sys.stdout.write(visible[selected_idx][0])
