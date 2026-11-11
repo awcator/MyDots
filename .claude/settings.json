@@ -34,7 +34,6 @@
     ],
     "defaultMode": "bypassPermissions"
   },
-  "model": "opus",
   "hooks": {
     "Notification": [
       {
@@ -183,5 +182,6 @@
   "verbose": true,
   "autoCompactEnabled": true,
   "skipAutoPermissionPrompt": true,
-  "customInstructions": "NEVER add any Claude attribution (like \"Co-Authored-By: Claude\" or similar) to git commit messages or PRs. The user forbids it."
+  "customInstructions": "NEVER add any Claude attribution (like \"Co-Authored-By: Claude\" or similar) to git commit messages or PRs. The user forbids it.",
+  "model": "gemini-3.8-flash-high"
 }

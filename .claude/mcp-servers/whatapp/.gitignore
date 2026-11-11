@@ -10,3 +10,7 @@ whatsapp.db-wal
 # Scratch files
 login_output.txt
 tts-venv/
+kokoro-venv/
+chatterbox-venv/
+kokoro/
+__pycache__/

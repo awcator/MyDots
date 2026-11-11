@@ -17,6 +17,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
+	"strings"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
@@ -72,9 +74,8 @@ func run() error {
 	// 1. send_message
 	sendTool := mcp.NewTool("send_message",
 		mcp.WithDescription(
-			"Send a WhatsApp message to the operator's watch number. Use this to "+
-				"notify/ping the operator when you need their attention, are blocked on a "+
-				"decision, or have finished a long-running task."),
+			"WhatsApp the operator. Use to notify, ping, report done, or escalate a "+
+				"blocked decision."),
 		mcp.WithString("message",
 			mcp.Required(),
 			mcp.Description("The message text to send."),
@@ -157,29 +158,16 @@ func run() error {
 
 	sendImageTool := mcp.NewTool("send_image",
 		mcp.WithDescription(
-			"Send a photo/image file (e.g. PNG, JPG, GIF, WebP) with an optional caption to the operator's watch number via WhatsApp."),
+			"Send an image (PNG/JPG/GIF/WebP) with an optional caption."),
 		mcp.WithString("path",
 			mcp.Required(),
-			mcp.Description("The file path to the image to send."),
+			mcp.Description("Image file path."),
 		),
 		mcp.WithString("caption",
 			mcp.Description("Optional caption for the image."),
 		),
 	)
 	s.AddTool(sendImageTool, handleSendImage)
-
-	sendPhotoTool := mcp.NewTool("send_photo",
-		mcp.WithDescription(
-			"Send a photo/image file (alias for send_image) with an optional caption to the operator's watch number via WhatsApp."),
-		mcp.WithString("path",
-			mcp.Required(),
-			mcp.Description("The file path to the photo/image to send."),
-		),
-		mcp.WithString("caption",
-			mcp.Description("Optional caption for the photo."),
-		),
-	)
-	s.AddTool(sendPhotoTool, handleSendImage)
 
 	// 3. send_file
 	handleSendFile := func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -205,10 +193,10 @@ func run() error {
 
 	sendFileTool := mcp.NewTool("send_file",
 		mcp.WithDescription(
-			"Send a document or file attachment (e.g. PDF, log file, text file, zip, code) with an optional caption to the operator's watch number via WhatsApp."),
+			"Send a document/file (PDF, log, zip, code…) with an optional caption."),
 		mcp.WithString("path",
 			mcp.Required(),
-			mcp.Description("The file path to the document/file to send as an attachment."),
+			mcp.Description("File path."),
 		),
 		mcp.WithString("caption",
 			mcp.Description("Optional caption or description for the attachment."),
@@ -216,28 +204,25 @@ func run() error {
 	)
 	s.AddTool(sendFileTool, handleSendFile)
 
-	sendAttachmentTool := mcp.NewTool("send_attachment",
-		mcp.WithDescription(
-			"Send a document or file attachment (alias for send_file) with an optional caption to the operator's watch number via WhatsApp."),
-		mcp.WithString("path",
-			mcp.Required(),
-			mcp.Description("The file path to the document/attachment to send."),
-		),
-		mcp.WithString("caption",
-			mcp.Description("Optional caption or description for the attachment."),
-		),
-	)
-	s.AddTool(sendAttachmentTool, handleSendFile)
 
 	// 4. call
 	callTool := mcp.NewTool("call",
 		mcp.WithDescription(
-			"Place a WhatsApp voice call to the operator's watch number. The call rings "+
-				"for ~30s then hangs up. To speak to the operator, provide `text` (spoken "+
-				"via neural text-to-speech) or an `audio` file path to play once answered. "+
-				"Use this to escalate when a text ping has gone unanswered."),
+			"Call the operator (rings ~30s). Give `text` (local emotional TTS, voice Nova) or "+
+				"an `audio` file. They can't see your screen, so make it a REAL, interesting "+
+				"call: a vivid scene with story and specifics, not a one-liner. "+
+				"HARD LIMIT: 30 words max, audio clipped to 15 seconds; text is truncated "+
+				"and quote marks stripped automatically. No double quotes in the text. "+
+				"Inline mood tags render as real sounds/tones — use 2-3 per call, varied, "+
+				"where a human would react: "+
+				"[whispering] [sigh] [groan] [crying] [sniff] [laugh] [chuckle] [gasp] "+
+				"[surprised] [happy] [angry] [fear] [sarcastic] [dramatic] [narration] "+
+				"[advertisement] [shush] [cough] [clear throat]. "+
+				"Intimate: [whispering]/[sigh]/[groan]. Celebratory: [happy]/[laugh]. "+
+				"Write short sentences with real punctuation — long run-ons render fast and "+
+				"flat. Renders before it dials."),
 		mcp.WithString("text",
-			mcp.Description("Optional text to speak. If set, it is rendered to speech (edge-tts) and played when the call is answered. Takes precedence over `audio`."),
+			mcp.Description("Spoken text; all 19 mood/emotion tags available (see tool description). Takes precedence over `audio`."),
 		),
 		mcp.WithString("audio",
 			mcp.Description("Optional path to an audio file (.mp3/.wav/.opus) to play when the call is answered."),
@@ -249,11 +234,14 @@ func run() error {
 		audio, _ := args["audio"].(string)
 		if text, _ := args["text"].(string); text != "" {
 			ttsBin := resolveTTSBin(waDir)
-			path, err := generateSpeech(ctx, ttsBin, ttsVoice, text, os.TempDir())
+			path, err := generateSpeech(ctx, ttsBin, ttsVoice, sanitizeCallText(text), os.TempDir())
 			if err != nil {
 				return mcp.NewToolResultError(err.Error()), nil
 			}
 			defer os.Remove(path)
+			if err := clipAudio(path, 15); err != nil {
+				return mcp.NewToolResultError(err.Error()), nil
+			}
 			audio = path
 		}
 
@@ -265,6 +253,31 @@ func run() error {
 	})
 
 	return server.ServeStdio(s)
+}
+
+// sanitizeCallText strips quote marks and caps the spoken text at 30 words,
+// since the call audio must stay short. Mood tags count as words.
+func sanitizeCallText(text string) string {
+	text = strings.NewReplacer(`"`, "", "“", "", "”", "", "„", "", "«", "", "»", "").Replace(text)
+	words := strings.Fields(text)
+	if len(words) > 30 {
+		words = words[:30]
+	}
+	return strings.Join(words, " ")
+}
+
+// clipAudio trims an audio file to at most maxSec seconds with a short fade
+// out. The fade start is past the end of shorter files, so it is a no-op there.
+func clipAudio(path string, maxSec int) error {
+	tmp := path + ".clip"
+	af := fmt.Sprintf("afade=t=out:st=%d.7:d=0.3", maxSec-1)
+	cmd := exec.Command("ffmpeg", "-y", "-loglevel", "error", "-i", path,
+		"-af", af, "-t", strconv.Itoa(maxSec), "-b:a", "48k", "-f", "mp3", tmp)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		os.Remove(tmp)
+		return fmt.Errorf("clip audio: %v: %s", err, out)
+	}
+	return os.Rename(tmp, path)
 }
 
 // resolveTTSBin locates the edge-tts executable.

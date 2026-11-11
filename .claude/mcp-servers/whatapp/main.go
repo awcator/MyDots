@@ -58,6 +58,11 @@ const dbFile = "whatsapp.db"
 
 // defaultRecipient is the watch number the bot always messages/calls. It lives
 // only here — compiled into the binary — not in settings, prompts, or scripts.
+// NOTE: the repo keeps the placeholder 91xxxxxxxxx on purpose. Before building,
+// swap in the real number; never commit the real number; revert after building.
+// Deploy target: ~/bin/wa AND ~/.claude/mcp-servers/whatapp/wa (WA_BIN).
+// See README.md — build breaks silently (bot messages the literal
+// "91xxxxxxxxx") if you build without substituting the real number.
 const defaultRecipient = "91xxxxxxxxx"
 
 func main() {
