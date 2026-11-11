@@ -95,45 +95,32 @@ def format_cell(item, index, width, selected):
     return color + fit_text(label, width) + RESET
 
 def make_pages(items, max_columns, max_rows, model_mode):
-    """Fill each section down first, adding columns only when it needs them."""
-    pages = [[]]
-    groups = (groupby(enumerate(items), lambda pair: pair[1][4])
-              if model_mode else [("", enumerate(items))])
-    for name, entries in groups:
-        indexes = [index for index, _ in entries]
-        offset = 0
-        while offset < len(indexes):
-            heading_rows = int(model_mode)
-            available = max_rows - len(pages[-1]) - heading_rows
-            remaining = len(indexes) - offset
-            full_height = max_rows - heading_rows
-            current_columns = (remaining + available - 1) // available if available > 0 else 0
-            fresh_columns = (remaining + full_height - 1) // full_height
-            if available < 1 or (pages[-1] and
-                    (current_columns > fresh_columns or
-                     remaining > available * max_columns)):
-                pages.append([])
-                continue
+    """Fill columns vertically, carrying the next section into unused cells."""
+    entries = []
+    if model_mode:
+        for name, group in groupby(enumerate(items), lambda pair: pair[1][4]):
+            indexes = [index for index, _ in group]
+            entries.append(f"{name} ({len(indexes)})")
+            entries.extend(indexes)
+    else:
+        entries = list(range(len(items)))
 
-            chunk = indexes[offset:offset + available * max_columns]
-            columns = min(max_columns, (len(chunk) + available - 1) // available)
-            if model_mode:
-                continuation = " · continued" if offset else ""
-                pages[-1].append((f"{name} ({len(indexes)}){continuation}", None, 0))
-            for row in range(min(available, len(chunk))):
-                cells = [chunk[col * available + row] for col in range(columns)
-                         if col * available + row < len(chunk)]
-                pages[-1].append(("", cells, columns))
-            offset += len(chunk)
-            if offset < len(indexes):
-                pages.append([])
+    pages = []
+    capacity = max_columns * max_rows
+    for offset in range(0, len(entries), capacity):
+        chunk = entries[offset:offset + capacity]
+        columns = min(max_columns, (len(chunk) + max_rows - 1) // max_rows)
+        rows = []
+        for row in range(min(max_rows, len(chunk))):
+            rows.append([chunk[col * max_rows + row]
+                         if col * max_rows + row < len(chunk) else None
+                         for col in range(columns)])
+        pages.append(rows)
 
-    if pages[-1] == []:
-        pages.pop()
     positions = {index: (page, row, col)
                  for page, rows in enumerate(pages)
-                 for row, (_, indexes, _) in enumerate(rows) if indexes
-                 for col, index in enumerate(indexes)}
+                 for row, cells in enumerate(rows)
+                 for col, index in enumerate(cells) if isinstance(index, int)}
     return pages, positions
 
 def move_selection(pages, positions, selected_idx, key, total_items):
@@ -145,13 +132,15 @@ def move_selection(pages, positions, selected_idx, key, total_items):
         return min(total_items - 1, selected_idx + 1)
     page, row, col = positions[selected_idx]
     if key in ("LEFT", "RIGHT"):
-        indexes = pages[page][row][1]
         target = col + (-1 if key == "LEFT" else 1)
-        return indexes[target] if 0 <= target < len(indexes) else selected_idx
+        cells = pages[page][row]
+        return (cells[target] if 0 <= target < len(cells) and
+                isinstance(cells[target], int) else selected_idx)
     target_page = page + (-1 if key == "PGUP" else 1)
     if not 0 <= target_page < len(pages):
         return selected_idx
-    return next(indexes[0] for _, indexes, _ in pages[target_page] if indexes)
+    return next(index for row in pages[target_page] for index in row
+                if isinstance(index, int))
 
 def render_ui(items, selected_idx, filter_text, heading_title, model_mode=False):
     tw, th = get_termsize()
@@ -183,20 +172,21 @@ def render_ui(items, selected_idx, filter_text, heading_title, model_mode=False)
     lines.append(C_BORDER + "╠" + "═" * (tw - 2) + "╣" + RESET)
 
     page_indexes = []
-    for name, indexes, columns in page_rows:
-        if indexes is None:
-            lines.append(C_BORDER + "║" + RESET + C_HEADER + BOLD +
-                         fit_text(f"  {name}", tw - 2) + RESET + C_BORDER + "║" + RESET)
-            continue
-        page_indexes.extend(indexes)
-        cell_space = tw - 2 - (columns - 1)
-        widths = [cell_space // columns + (col < cell_space % columns)
-                  for col in range(columns)]
+    columns = len(page_rows[0]) if page_rows else 1
+    cell_space = tw - 2 - (columns - 1)
+    widths = [cell_space // columns + (col < cell_space % columns)
+              for col in range(columns)]
+    for row in page_rows:
         cells = []
         for col, width in enumerate(widths):
-            index = indexes[col] if col < len(indexes) else None
-            cells.append(format_cell(visible[index], index, width, index == selected_idx)
-                         if index is not None else " " * width)
+            entry = row[col]
+            if isinstance(entry, int):
+                page_indexes.append(entry)
+                cells.append(format_cell(visible[entry], entry, width, entry == selected_idx))
+            elif isinstance(entry, str):
+                cells.append(C_HEADER + BOLD + fit_text(f"  {entry}", width) + RESET)
+            else:
+                cells.append(" " * width)
         separator = C_BORDER + "│" + RESET
         lines.append(C_BORDER + "║" + RESET + separator.join(cells) + C_BORDER + "║" + RESET)
 
