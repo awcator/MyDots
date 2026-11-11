@@ -1,0 +1,64 @@
+#!/home/awcator/.claude/mcp-servers/whatapp/chatterbox-venv/bin/python
+"""Local emotional TTS drop-in mimicking the edge-tts CLI (wa-mcp TTS_BIN).
+
+Usage: chatterbox-tts --voice nova --text "great news! [laugh]" --write-media out.mp3
+Voices are reference clips in <this dir>/voices/<name>.wav (voice cloning).
+--text may contain native Chatterbox-Turbo paralinguistic tags (all 19):
+[whispering] [sigh] [groan] [crying] [sniff] [laugh] [chuckle] [gasp]
+[surprised] [happy] [angry] [fear] [sarcastic] [dramatic] [narration]
+[advertisement] [shush] [cough] [clear throat] — real sounds/tones, never
+spoken as words. CPU-only, ~25 s per call line.
+"""
+import argparse
+import os
+import subprocess
+import sys
+import tempfile
+
+DIR = os.path.dirname(os.path.abspath(__file__))
+VOICES = os.path.join(DIR, "voices")
+
+p = argparse.ArgumentParser()
+p.add_argument("--voice", default=os.environ.get("TTS_VOICE", "nova"))
+p.add_argument("--text")
+p.add_argument("--write-media")
+p.add_argument("--list-voices", action="store_true")
+p.add_argument("--exaggeration", type=float, default=float(os.environ.get("TTS_EXAG", "0.7")))
+# accepted and ignored, for edge-tts CLI compatibility
+p.add_argument("--lang", default=None)
+p.add_argument("--speed", type=float, default=float(os.environ.get("TTS_SPEED", "1.0")))
+a = p.parse_args()
+
+if a.list_voices:
+    for f in sorted(os.listdir(VOICES)):
+        if f.endswith(".wav"):
+            print(f[:-4])
+    sys.exit(0)
+
+if not a.text or not a.write_media:
+    p.error("--text and --write-media are required")
+
+ref = os.path.join(VOICES, a.voice + ".wav")
+if not os.path.exists(ref):
+    sys.exit(f"unknown voice {a.voice!r}; have: " + ", ".join(os.listdir(VOICES)))
+
+import numpy as np
+import soundfile as sf
+from chatterbox.tts_turbo import ChatterboxTurboTTS
+
+# ponytail: model reloads each call (~30 s); make it a daemon if calls get frequent
+tts = ChatterboxTurboTTS.from_pretrained(device="cpu")
+t = tts.generate(a.text, audio_prompt_path=ref, exaggeration=a.exaggeration)
+data = np.asarray(t.cpu().numpy(), dtype="float32").reshape(-1)
+
+with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
+    wav = f.name
+try:
+    sf.write(wav, data, int(tts.sr), format="WAV", subtype="PCM_16")
+    filt = f"atempo={a.speed}," if a.speed != 1.0 else ""
+    subprocess.run(
+        ["ffmpeg", "-y", "-loglevel", "error", "-i", wav, "-af", f"{filt}loudnorm=I=-16:TP=-1.5", "-b:a", "48k", a.write_media],
+        check=True,
+    )
+finally:
+    os.unlink(wav)

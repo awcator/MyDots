@@ -1,0 +1,49 @@
+#!/home/awcator/.claude/mcp-servers/whatapp/kokoro-venv/bin/python
+"""Local TTS drop-in that mimics the edge-tts CLI (wa-mcp TTS_BIN override).
+
+Usage: kokoro-tts --voice af_heart --text "hello" --write-media out.mp3
+Voices: run with --list-voices. Requires ffmpeg for mp3 output.
+"""
+import argparse
+import os
+import subprocess
+import sys
+import tempfile
+
+DIR = os.path.dirname(os.path.abspath(__file__))
+MODEL = os.path.join(DIR, "kokoro", "model.onnx")
+VOICES = os.path.join(DIR, "kokoro", "voices.bin")
+
+p = argparse.ArgumentParser()
+p.add_argument("--voice", default="af_heart")
+p.add_argument("--text")
+p.add_argument("--write-media")
+p.add_argument("--list-voices", action="store_true")
+p.add_argument("--lang", default="en-us")
+p.add_argument("--speed", type=float, default=1.0)
+a = p.parse_args()
+
+from kokoro_onnx import Kokoro
+
+k = Kokoro(MODEL, VOICES)
+if a.list_voices:
+    for name, lang in k.list_voices():
+        print(f"{name}  {lang}")
+    sys.exit(0)
+
+if not a.text or not a.write_media:
+    p.error("--text and --write-media are required")
+
+samples, sr = k.create(a.text, voice=a.voice, speed=a.speed, lang=a.lang)
+import soundfile as sf
+
+with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
+    wav = f.name
+try:
+    sf.write(wav, samples, sr)
+    subprocess.run(
+        ["ffmpeg", "-y", "-loglevel", "error", "-i", wav, "-b:a", "48k", a.write_media],
+        check=True,
+    )
+finally:
+    os.unlink(wav)
