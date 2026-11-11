@@ -46,12 +46,19 @@ models = payload.get("data", []) if isinstance(payload, dict) else payload
 active = set(filter(None, os.environ.get("_CL_ACTIVE_PROVIDERS", "").split(",")))
 rows = {}
 for model in models:
+    if not isinstance(model, dict):
+        continue
     mid = model.get("id")
     if not mid:
         continue
     owner = model.get("owned_by") or ""
     label = model.get("name") or owner
-    status = "provider not active" if active and owner not in active else ""
+    flags = []
+    if active and owner not in active:
+        flags.append("provider not active")
+    if (model.get("capabilities") or {}).get("tool_calling") is False:
+        flags.append("no tool calling")
+    status = "; ".join(flags)
     rows[mid] = (mid, label, status)
 for mid, label, status in sorted(rows.values(), key=_nkey):
     print("%s\t%s\t%s" % (mid, label, status))

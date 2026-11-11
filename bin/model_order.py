@@ -13,7 +13,10 @@ _EFFORT_SUFFIXES = (
     "-nvfp4", "-fp8", "-q4-k-m", "-q5-k-m", "-q8-0",
     "-iq4-xs", "-iq3-s-imat", "-preview",
 )
-_DATE_SUFFIX = re.compile(r"-20\d{2}(?:-\d{2}-\d{2}|\d{4})$")
+_DATE_SUFFIX = re.compile(
+    r"-(?:20\d{2}(?:-\d{2}-\d{2}|\d{4})|"
+    r"(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01]))$"
+)
 _TOKEN = re.compile(r"(?<![a-z0-9])(?:%s)(?![a-z0-9])")
 _GROUPS = {
     "unknown": "Unknown / new models · unranked",
@@ -24,6 +27,7 @@ _GROUPS = {
     "image": "🎨 Image models",
     "video": "🎬 Video models",
     "audio": "🎧 Audio models",
+    "no_tools": "🧩 Models without tool calling",
     "other": "🧩 Other non-coding models",
 }
 _GROUP_ORDER = {name: index for index, name in enumerate(_GROUPS)}
@@ -71,6 +75,8 @@ def _contains(value, words):
 
 def _kind(model_id, status):
     value = _normalize(model_id)
+    if value == "codex-auto-review":
+        return "other", "🧩"
     if model_id.casefold().startswith("aihorde/"):
         return "image", "🎨"
     if _contains(value, "video|veo|sora|seedance|runway"):
@@ -83,8 +89,10 @@ def _kind(model_id, status):
     if (_contains(value, "vision|vl") or
             re.search(r"(?:^|-)glm-\d+-\d+v(?:$|-)", value)):
         return "vision", "👁️"
+    if "no tool calling" in status.casefold():
+        return "no_tools", "🧩"
     if (_contains(value, "embedding|embeddings|embed|rerank|moderation|"
-                        "search|document|scholar|social") or
+                        "search|sonar|document|scholar|social") or
             "non-text" in status.casefold()):
         return "other", "🧩"
     return "coding", ""
@@ -114,16 +122,18 @@ def order_models(items):
         else:
             rank = len(ranks)
             group = "unknown"
+            matches = []
             for source in (model_id, title):
                 for candidate in _model_candidates(source):
                     canonical = aliases.get(candidate, candidate)
                     if canonical in ranks:
-                        rank, group = ranks[canonical], "coding"
+                        matches.append((canonical.count("-"), ranks[canonical]))
                         break
                     if canonical in known and group == "unknown":
                         group = "known"
-                if group == "coding":
-                    break
+            if matches:
+                rank = min(matches, key=lambda match: (-match[0], match[1]))[1]
+                group = "coding"
         item = (model_id, title, status, icon, _GROUPS[group])
         return (_GROUP_ORDER[group], rank, _natural_key(model_id)), item
 
