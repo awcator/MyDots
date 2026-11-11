@@ -966,13 +966,19 @@ for mid, desc, status in rows:
 }
 
 # ══════════════════════════════════════════════════════════════════════════════
-#  Backend: Strata  (port 8080, run-coder-iq1_m.sh)
+#  Backend: Strata  (run-uncensored.sh)
 # ══════════════════════════════════════════════════════════════════════════════
 
 _cl_backend_strata() {
   local model_override="${1:-}"
   local repo_dir="${STRATA_REPO:-$_CLD_SIBLINGS/Strata}"
-  local base_url="${STRATA_BASE_URL:-http://127.0.0.1:8080}"
+  local launcher="$repo_dir/run-uncensored.sh"
+  local port="${STRATA_PORT:-}"
+  if [[ -z "$port" && -f "$launcher" ]]; then
+    port="$(sed -nE 's/.*--port[[:space:]]+([0-9]+).*/\1/p' "$launcher" | tail -1)"
+  fi
+  port="${port:-8090}"
+  local base_url="${STRATA_BASE_URL:-http://127.0.0.1:$port}"
   base_url="${base_url%/}"
 
   _cl_clear_env
@@ -981,12 +987,12 @@ _cl_backend_strata() {
   export ANTHROPIC_AUTH_TOKEN="${STRATA_AUTH_TOKEN:-test}"
 
   if [[ -z "${STRATA_BASE_URL:-}" ]]; then
-    if ! _cl_port_up 8080 && [[ ! -f "$repo_dir/run-uncensored.sh" ]]; then
+    if ! _cl_port_up "$port" && [[ ! -f "$launcher" ]]; then
       _cl_die "strata: proxy checkout not found at $repo_dir (set STRATA_REPO)"
       return 1
     fi
-    _cl_spawn_proxy strata 8080 \
-      bash -c 'cd "$1" && exec ./run-uncensored.sh' _ "$repo_dir" || return 1
+    _cl_spawn_proxy strata "$port" \
+      bash -c 'cd "$1" && exec ./run-uncensored.sh --port "$2"' _ "$repo_dir" "$port" || return 1
   fi
 
   local models_json i
@@ -1087,7 +1093,8 @@ Existing services can be selected with COPILOT_BASE_URL, DEVIN_PROXY_BASE_URL,
 AG_BASE_URL, CODEX_PROXY_BASE_URL, OMNIROUTE_BASE_URL, or STRATA_BASE_URL.
 Use the service origin for these URLs; OMNIROUTE_BASE_URL includes /v1.
 Set DEVIN_PROXY_API_KEY for a protected Devin proxy. Local port overrides:
-JUNIE_PORT, DEVIN_PROXY_PORT, AG_PORT, AISTUDIO_PORT, OPENAI_PROXY_PORT.
+JUNIE_PORT, DEVIN_PROXY_PORT, AG_PORT, AISTUDIO_PORT, OPENAI_PROXY_PORT,
+STRATA_PORT.
 COPILOT_AUTH_TOKEN, JUNIE_AUTH_TOKEN, AG_AUTH_TOKEN, and STRATA_AUTH_TOKEN
 configure authentication for those proxies when needed.
 COPILOT_ACCOUNT_TYPE, STRATA_CONTEXT_TOKENS, and CLAUDELOAD_MAX_OUTPUT_TOKENS
