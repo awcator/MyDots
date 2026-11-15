@@ -21,11 +21,11 @@ No trailing \\w* so only the matched keyword is highlighted, not the suffix.
 # ── mark1: RED — errors, failures, problems ──────────────────────────────
 E = (
     # general failure verbs/nouns
-    r'(close|error|err|fail|fault|fatal|critical|severe|panic|oops|not|'
-    r'crash|segfault|segv|sigsegv|sigabrt|sigkill|sigterm|'
-    r'coredump|core\s+dump|abort|exception|throwable|'
+    r'(close|errors?|errored|err|failures?|failed|failing|fail|fault|fatal|critical|severe|panic|oops|not|'
+    r'crash|segfault|segv|sigsegv|sigabrt|sigkill|sigterm|sigbus|sigill|sigfpe|'
+    r'coredump|core\s+dump|abort|aborted|exception|throwable|'
     r'traceback|stacktrace|stack\s+trace|backtrace|'
-    r'assertion|violation|doesnt|doesn|cant|'
+    r'assertion|violation|doesnt|doesn|cant|cannot|wont|isnt|arent|false|'
     # denied / refused / auth failures
     r'denied|refused|forbidden|unauthorized|unauthenticated|'
     r'rejected|revoked|banned|blacklisted|blocklisted|restricted|'
@@ -34,16 +34,22 @@ E = (
     r'unavailable|unreachable|unresponsive|disconnected|offline|'
     r'down|dead|gone|lost|missing|absent|not\s+found|no\s+such|end|'
     # broken state
-    r'broken|corrupt|malformed|invalid|illegal|bad|wrong|incorrect|'
+    r'broken|corrupt|corrupted|malformed|invalid|illegal|bad|wrong|incorrect|'
     r'inconsistent|mismatch|incompatible|unsupported|unrecognized|'
     r'unexpected|unknown|undefined|uninitialized|null|nil|nan|void|'
     r'nullptr|nullpointer|nullref|npe|empty|blank|'
     # explicit negative outcomes
-    r'failed|failure|unsuccessful|unresolved|unhandled|uncaught|'
+    r'unsuccessful|unresolved|unhandled|uncaught|'
     r'unprocessed|undelivered|unfinished|incomplete|'
     r'unfulfilled|unmatched|unparseable|unreadable|'
     # health / stability
     r'unhealthy|unstable|degraded|impaired|flaky|flapping|'
+    # containers / system errors
+    r'CrashLoopBackOff|OOMKilled|ImagePullBackOff|ErrImagePull|DeadlineExceeded|'
+    r'ECONNREFUSED|ECONNRESET|ETIMEDOUT|EHOSTUNREACH|ENETUNREACH|EPIPE|EADDRINUSE|'
+    r'ENOENT|EACCES|EPERM|EINVAL|EBUSY|ENOMEM|ENOSPC|'
+    r'command\s+not\s+found|operation\s+not\s+permitted|address\s+already\s+in\s+use|'
+    r'bad\s+gateway|service\s+unavailable|gateway\s+timeout|'
     # resource problems
     r'overflow|underflow|overrun|underrun|exhausted|full|'
     r'leak|leaked|leaking|oom|out\s+of\s+memory|'
@@ -56,16 +62,16 @@ E = (
     # stopped / killed
     r'killed|terminated|aborted|cancelled|canceled|stopped|halted|'
     r'shutdown|crashed|dumped|trapped|interrupted|'
-    r'exited\s+with|exit\s+code|non-zero|nonzero|zero|'
+    r'exited\s+with|exit\s+code|exit\s+status|non-zero|nonzero|zero|'
     # network / dns
     r'NXDOMAIN|SERVFAIL|REFUSED|FORMERR|connreset|connrefused|'
-    r'connection\s+reset|connection\s+refused|connection\s+closed|close'
+    r'connection\s+reset|connection\s+refused|connection\s+closed|connection\s+timed\s+out|'
     r'broken\s+pipe|reset\s+by\s+peer|host\s+unreachable|'
     r'network\s+unreachable|no\s+route|dns\s+fail|'
     r'ssl\s+error|tls\s+error|handshake\s+fail|cert\s+expired|'
     # data integrity
     r'truncated|garbled|scrambled|overwritten|clobbered|'
-    r'collision|conflict|duplicate|'
+    r'collision|conflict|duplicate|merge\s+conflict|'
     r'checksum|crc\s+error|hash\s+mismatch|digest\s+mismatch|'
     # rollback / revert
     r'rollback|reverted|regression|downgraded|'
@@ -73,7 +79,7 @@ E = (
     r'deprecated|obsolete|removed|dropped|abandoned|orphaned|'
     r'eol|end\s+of\s+life|sunset|'
     # negative words
-    r'negative|unable|cannot|impossible|'
+    r'negative|unable|impossible|'
     r'nothing|nowhere|nobody|'
     # warning level
     r'warning|warn|alert|alarm|danger|dangerous|hazard|'
@@ -82,17 +88,17 @@ E = (
     r'400|401|403|404|405|406|408|409|410|411|412|413|414|'
     r'415|416|422|423|424|429|431|451|'
     r'500|501|502|503|504|505|507|508|511|miss|'
-    # exit codes
-    r'errno|errcode|errnum|exitcode)'
+    # exit codes / symbols
+    r'errno|errcode|errnum|exitcode|✗|✘|❌|✖)'
 )
 
 # ── mark2: GREEN — success, positive outcomes ────────────────────────────
 S = (
     # explicit success
-    r'(ok|okay|yes|success|succeed|'
-    r'pass|passed|passing|'
-    r'done|complete|accomplish|achieve|'
-    r'finish|finalize|'
+    r'(ok|okay|yes|successfully|succeeded|success|succeed|'
+    r'passing|passed|pass|'
+    r'completed|complete|done|accomplish|achieve|'
+    r'finished|finish|finalize|'
     # positive state
     r'ready|available|active|alive|healthy|stable|steady|resilient|'
     r'online|reachable|accessible|responsive|up|'
@@ -112,23 +118,23 @@ S = (
     r'patched|remediated|mitigated|rescued|'
     # data operations
     r'saved|stored|persisted|committed|written|flushed|'
-    r'cached|indexed|replicated|backed\s+up|'
+    r'cached|indexed|replicated|backed\s+up|cache\s+hit|'
     r'merged|synced|synchronized|aligned|reconciled|'
     r'received|acknowledged|acked|'
     # positive adjectives
     r'correct|accurate|proper|good|great|fine|'
     r'clean|safe|secure|trusted|reliable|robust|solid|'
     r'approved|endorsed|recommended|preferred|optimal|'
-    r'improved|enhanced|optimized|upgraded|'
+    r'improved|enhanced|optimized|upgraded|up-to-date|uptodate|'
     # found / matched
     r'found|located|detected|discovered|matched|identified|'
-    r'recognized|resolved|'
+    r'recognized|satisfied|'
     # registered / initialized
     r'registered|enrolled|subscribed|joined|'
     r'initialized|bootstrapped|loaded|mounted|attached|'
     # test results
-    r'NOERROR|noterror|hit|'
-    r'green|✓|✔|passed|approved|'
+    r'NOERROR|noterror|hit|true|'
+    r'green|✓|✔|✅|'
     # http success codes
     r'200|201|202|203|204|206|'
     r'301|302|304)'
@@ -137,11 +143,11 @@ S = (
 # ── mark3: YELLOW — status, info, in-progress ────────────────────────────
 T = (
     # in-progress states
-    r'(loading|pending|waiting|processing|busy|open'
+    r'(loading|pending|waiting|processing|busy|open|'
     r'queued|enqueued|scheduled|dispatched|dequeued|'
     r'executing|computing|calculating|rendering|'
     r'compiling|building|assembling|linking|packaging|bundling|'
-    r'testing|benchmarking|profiling|linting|formatting|'
+    r'testing|benchmarking|profiling|linting|formatting|transpiling|minifying|'
     # io operations
     r'reading|writing|copying|moving|renaming|'
     r'downloading|uploading|streaming|piping|'
@@ -155,6 +161,7 @@ T = (
     r'authenticating|authorizing|'
     r'migrating|upgrading|updating|patching|'
     r'installing|uninstalling|reinstalling|'
+    r'ContainerCreating|PodInitializing|staged|unstaged|untracked|diverged|'
     r'shutting\s+down|winding\s+down|draining|'
     r'reloading|refreshing|recycling|rotating|'
     r'scaling|autoscaling|rebalancing|resharding|'
