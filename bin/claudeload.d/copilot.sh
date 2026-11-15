@@ -20,7 +20,7 @@ _cl_backend_run() {
       return 1
     fi
     _cl_spawn_proxy copilot "$port" \
-      npx -y copilot-api@latest start --port "$port" --account-type "${COPILOT_ACCOUNT_TYPE:-business}" || return 1
+      npx -y @jeffreycao/copilot-api@latest start --port "$port" || return 1
   fi
 
   local models_json tsv all base

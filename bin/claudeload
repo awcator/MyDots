@@ -82,6 +82,17 @@ EOF
 _cl_dispatch "$@"
 _CLD_RESULT=$?
 
+# ── Claude bridge (LAN terminal mirror for phone app) ────────────────────────
+if [[ $_CLD_RESULT -eq 0 ]]; then
+  _BRIDGE_DIR="$HOME/AndroidStudioProjects/AppLocker/claude-bridge"
+  _BRIDGE_PORT="${CLAUDE_BRIDGE_PORT:-8765}"
+  if [[ -f "$_BRIDGE_DIR/bridge.mjs" ]] && ! _cl_port_up "$_BRIDGE_PORT"; then
+    _cl_spawn_proxy claude-bridge "$_BRIDGE_PORT" \
+      bash -c 'cd "$1" && exec node bridge.mjs --port "$2"' _ "$_BRIDGE_DIR" "$_BRIDGE_PORT"
+  fi
+  unset _BRIDGE_DIR _BRIDGE_PORT
+fi
+
 # ── Global flags (applied regardless of backend) ─────────────────────────────
 export DISABLE_NON_ESSENTIAL_MODEL_CALLS=1
 export CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1

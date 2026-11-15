@@ -21,7 +21,7 @@ No trailing \\w* so only the matched keyword is highlighted, not the suffix.
 # ── mark1: RED — errors, failures, problems ──────────────────────────────
 E = (
     # general failure verbs/nouns
-    r'(error|err|fail|fault|fatal|critical|severe|panic|oops|not|'
+    r'(close|error|err|fail|fault|fatal|critical|severe|panic|oops|not|'
     r'crash|segfault|segv|sigsegv|sigabrt|sigkill|sigterm|'
     r'coredump|core\s+dump|abort|exception|throwable|'
     r'traceback|stacktrace|stack\s+trace|backtrace|'
@@ -81,7 +81,7 @@ E = (
     # http error codes
     r'400|401|403|404|405|406|408|409|410|411|412|413|414|'
     r'415|416|422|423|424|429|431|451|'
-    r'500|501|502|503|504|505|507|508|511|'
+    r'500|501|502|503|504|505|507|508|511|miss|'
     # exit codes
     r'errno|errcode|errnum|exitcode)'
 )
@@ -127,7 +127,7 @@ S = (
     r'registered|enrolled|subscribed|joined|'
     r'initialized|bootstrapped|loaded|mounted|attached|'
     # test results
-    r'NOERROR|noterror|'
+    r'NOERROR|noterror|hit|'
     r'green|✓|✔|passed|approved|'
     # http success codes
     r'200|201|202|203|204|206|'
