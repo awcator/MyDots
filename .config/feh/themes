@@ -1,0 +1,1 @@
+feh -q --recursive --auto-zoom --scale-down --action2 ";realpath %F | xclip -selection clipboard"

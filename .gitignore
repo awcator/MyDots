@@ -13,3 +13,5 @@ id_ed25519
 **/node_modules
 bin/wa
 bin/wa-mcp
+__pycache__/
+*.pyc
