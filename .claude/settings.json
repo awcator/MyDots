@@ -34,6 +34,7 @@
     ],
     "defaultMode": "bypassPermissions"
   },
+  "model": "gemini-3.8-flash-high",
   "hooks": {
     "Notification": [
       {
@@ -174,14 +175,22 @@
   "modelSettings": {
     "qwen3.8-flash-next-uncensored-ud-q4_k_xl": {
       "effortLevel": "medium"
+    },
+    "gemini-3-8-flash-high": {
+      "autoCompactWindow": "auto"
+    },
+    "claude-opus-5-5": {
+      "autoCompactWindow": "auto"
     }
   },
   "awaySummaryEnabled": true,
   "tui": "fullscreen",
   "skipDangerousModePermissionPrompt": true,
+  "claudeMdExcludes": [
+    "**/*.md"
+  ],
   "verbose": true,
   "autoCompactEnabled": true,
   "skipAutoPermissionPrompt": true,
-  "customInstructions": "NEVER add any Claude attribution (like \"Co-Authored-By: Claude\" or similar) to git commit messages or PRs. The user forbids it.",
-  "model": "gemini-3.8-flash-high"
+  "customInstructions": "NEVER add any Claude attribution (like \"Co-Authored-By: Claude\" or similar) to git commit messages or PRs. The user forbids it."
 }

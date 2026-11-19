@@ -1,15 +1,41 @@
 #!/bin/bash
-cat /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor
-echo "making performce"
-read -p "Do you want to enable beastmode? (y/n) " -n 1 -r
+# beastmode - tuned for the HP ZBook Fury 16 G10 (i9-13950HX + RTX 5000 Ada, thermally limited).
+#
+# "on" gives the fastest model output on THIS machine, which is not the usual "pin everything to max":
+#   - NVIDIA Dynamic Boost on (nvidia-powerd): GPU power cap 80W -> up to 105W
+#   - CPU kept on powersave and capped (default 3.6 GHz): the i9 and the GPU share one vapor chamber,
+#     so a heat-soaked CPU starves the GPU's boost. Lowering the CPU peak frees GPU thermal budget.
+#   - internal fan forced to full speed via hp-wmi
+# "off" restores the stock CPU / GPU / fan behaviour.
+CPU_MAX_MHZ=${CPU_MAX_MHZ:-3600}
+
+cat /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor 2>/dev/null | sort | uniq -c
+
+if [[ -n "$1" ]]; then
+    REPLY=$1
+else
+    read -p "Do you want to enable beastmode? (y/n) " -n 1 -r
+    echo
+fi
 
 if [[ $REPLY =~ ^[Yy]$ ]]
 then
-    echo -e "\nenabling beastmode"
-    sudo cpupower frequency-set -g performance
+    echo -e "\nenabling beastmode (CPU capped at ${CPU_MAX_MHZ} MHz to free the shared cooler for the GPU)"
+    sudo systemctl enable --now nvidia-powerd       # Dynamic Boost: GPU 80W -> up to 105W
+    sudo nvidia-smi -pm 1
+    sudo cpupower frequency-set -g powersave
+    sudo cpupower frequency-set -u "${CPU_MAX_MHZ}MHz"
+    echo 0 | sudo tee /sys/devices/platform/hp-wmi/hwmon/hwmon*/pwm1_enable >/dev/null 2>&1   # fan full speed
+    nvidia-smi --query-gpu=clocks.sm,clocks.max.sm,power.draw --format=csv,noheader 2>/dev/null
 else
     echo -e "\ndisabling beastmode"
     sudo cpupower frequency-set -g powersave
+    for c in /sys/devices/system/cpu/cpu*/cpufreq; do
+        sudo sh -c "cat $c/cpuinfo_max_freq > $c/scaling_max_freq" 2>/dev/null   # remove the cap
+    done
+    echo 2 | sudo tee /sys/devices/platform/hp-wmi/hwmon/hwmon*/pwm1_enable >/dev/null 2>&1   # fan auto
+    sudo systemctl stop nvidia-powerd 2>/dev/null
+    sudo nvidia-smi -pm 0
+    echo "CPU / GPU / fan restored"
 fi
-cat /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor
-#cpupower frequency-set -g on-demand
+cat /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor 2>/dev/null | sort | uniq -c
